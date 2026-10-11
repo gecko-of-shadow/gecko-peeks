@@ -25,6 +25,7 @@ internal sealed class MainForm : Form
     private bool _exitRequested;
     private int _hopsRevision = -1;
     private int _logRevision = -1;
+    private string _lastActivityLine = "\u0000";
 
     public MainForm(ProbeScheduler scheduler)
     {
@@ -178,7 +179,12 @@ internal sealed class MainForm : Form
     {
         if (!Visible)
             return;
-        ApplyStatus(_scheduler.Capture());
+        // Per-second tick: only the countdown changes every second. Full status
+        // (and the activity ListBox) refresh on scheduler Updated events.
+        var snapshot = _scheduler.Capture();
+        _nextValue.Text = Countdown(snapshot);
+        _phaseValue.Text = string.IsNullOrWhiteSpace(snapshot.Phase) ? "Idle" : snapshot.Phase;
+        _phaseValue.ForeColor = PhaseColor(snapshot);
     }
 
     private void ApplyStatus(ProbeSnapshot snapshot)
@@ -191,9 +197,14 @@ internal sealed class MainForm : Form
         _nextValue.Text = Countdown(snapshot);
         _phaseValue.Text = string.IsNullOrWhiteSpace(snapshot.Phase) ? "Idle" : snapshot.Phase;
         _phaseValue.ForeColor = PhaseColor(snapshot);
-        _activityValue.Text = string.IsNullOrWhiteSpace(snapshot.ActivityLine)
+        var activityLine = string.IsNullOrWhiteSpace(snapshot.ActivityLine)
             ? "No activity yet."
             : snapshot.ActivityLine;
+        _activityValue.Text = activityLine;
+
+        if (activityLine == _lastActivityLine && _activityList.Items.Count == snapshot.Activity.Count)
+            return;
+        _lastActivityLine = activityLine;
 
         _activityList.BeginUpdate();
         _activityList.Items.Clear();
