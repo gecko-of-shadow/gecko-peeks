@@ -45,6 +45,9 @@ internal static class Program
 
 internal static class CrashLog
 {
+    /// <summary>The route log's folder, so crash.log follows the log out of Documents.</summary>
+    public static string? Folder { get; set; }
+
     public static void Write(Exception? exception)
     {
         if (exception == null)
@@ -52,9 +55,7 @@ internal static class CrashLog
 
         try
         {
-            var folder = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
-                "RiotRouteLog");
+            var folder = Folder ?? LogPaths.Resolve().Folder;
             Directory.CreateDirectory(folder);
             var path = Path.Combine(folder, "crash.log");
             File.AppendAllText(path, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss}  {exception}{Environment.NewLine}");

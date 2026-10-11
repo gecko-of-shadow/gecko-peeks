@@ -24,9 +24,16 @@ public sealed class ProbeSnapshot
     public string Tooltip { get; init; } = "Gecko Peeks \u2014 no route yet";
 
     public string LogFolder { get; init; } = "";
-    public string LogFileName { get; init; } = "riot-route-log.csv";
-    public string LogWriteStatus { get; init; } = "Waiting for first write";
+    public string LogFileName { get; init; } = CsvLog.MainFileName;
+    public string LogWriteStatus { get; init; } = LogStatusText.Waiting(null);
+
+    /// <summary>Short reason while the log is blocked, else empty. Never raw exception text.</summary>
     public string LogLastError { get; init; } = "";
+    public LogHealth LogHealth { get; init; } = LogHealth.Waiting;
+
+    /// <summary>Why the log is in AppData instead of Documents, else empty.</summary>
+    public string LogLocation { get; init; } = "";
+    public int LogUnsavedRows { get; init; }
 }
 
 /// <summary>
@@ -35,9 +42,11 @@ public sealed class ProbeSnapshot
 /// </summary>
 public sealed class ProbeScheduler : IDisposable
 {
+    private const string SettingsFileName = "gecko-peeks-settings.json";
+    private const string ActivityFileName = "activity.log";
+
     private readonly CsvLog _csv;
     private readonly ActivityLog _activity;
-    private readonly string _settingsPath;
     private readonly object _gate = new();
     private readonly CancellationTokenSource _cts = new();
     private readonly SemaphoreSlim _wake = new(0, int.MaxValue);
@@ -65,7 +74,8 @@ public sealed class ProbeScheduler : IDisposable
     private string _tipRiot = "";
     private string _tipLastHop = "";
     private string _tipHandoffRtt = "";
-    private string _logWriteStatus = "Waiting for first write";
+    private string _logWriteStatus = LogStatusText.Waiting(null);
+    private string _activityFolder;
     private DateTime? _tipTimestamp;
     private DateTime? _nextDueUtc;
     private DateTime? _lastTestUtc;
@@ -75,14 +85,24 @@ public sealed class ProbeScheduler : IDisposable
 
     public ProbeScheduler(LogPaths paths)
     {
-        Paths = paths;
-        _csv = new CsvLog(paths.Folder);
-        _activity = new ActivityLog(paths.ActivityPath);
-        _settingsPath = paths.SettingsPath;
+        _csv = new CsvLog(paths.Folder, fallbackFolder: paths.FallbackFolder);
+        _csv.PrepareFolder();
+        if (_csv.MovedThisSession)
+        {
+            CarryOver(SettingsFileName);
+            CarryOver(ActivityFileName);
+        }
+
+        _activityFolder = _csv.Folder;
+        _activity = new ActivityLog(Path.Combine(_activityFolder, ActivityFileName));
+        CrashLog.Folder = _activityFolder;
     }
 
-    public LogPaths Paths { get; }
+    /// <summary>Folder is where the log is now: AppData once Controlled folder access moved it there.</summary>
+    public LogPaths Paths => new(_csv.Folder, _csv.FallbackFolder);
     public CsvLog Log => _csv;
+
+    private string SettingsPath => Path.Combine(_csv.Folder, SettingsFileName);
 
     public event Action<ProbeSnapshot>? Updated;
     public event Action<string>? RouteChanged;
@@ -91,6 +111,10 @@ public sealed class ProbeScheduler : IDisposable
     {
         _ui = SynchronizationContext.Current;
         LoadFromDisk();
+        if (_csv.MovedThisSession)
+            Note(LogStatusText.MovedNote(_csv.CopiedRows));
+        else if (_csv.Health == LogHealth.Blocked)
+            Note(LogStatusText.BlockedAtStartNote);
         Publish();
         var token = _cts.Token;
         _runner = Task.Run(() => RunnerLoop(token), token);
@@ -323,6 +347,11 @@ public sealed class ProbeScheduler : IDisposable
                 lock (_gate)
                 {
                     _testRunning = false;
+                    // Every finished run moves the due time, saved or not. Otherwise a run that
+                    // cannot write (or gets no replies) leaves it in the past and tests run back to back.
+                    _lastTestUtc = DateTime.UtcNow;
+                    if (!_paused)
+                        RecomputeDue();
                     again = _runRequested == 1 && _acceptRuns;
                     if (string.IsNullOrWhiteSpace(_lastError))
                         _phase = _paused ? "Paused" : "Idle";
@@ -399,6 +428,7 @@ public sealed class ProbeScheduler : IDisposable
             return;
         }
 
+        var folderBefore = _csv.Folder;
         AppendResult where;
         try
         {
@@ -406,34 +436,41 @@ public sealed class ProbeScheduler : IDisposable
         }
         catch (Exception ex)
         {
+            // The LOCAL LOG strip carries the reason; the status panel only points there,
+            // so the same error is not shown (and clipped) twice.
             lock (_gate)
             {
-                _lastError = ex.Message;
-                _logWriteStatus = "Write failed — see error below.";
+                _lastError = row.Error;
+                _phase = string.IsNullOrWhiteSpace(row.Error) ? "Idle" : "Last test problem: " + row.Error;
+                _hops = row.Hops.ToList();
+                _hopsAreAddressesOnly = false;
+                _hopsRevision++;
             }
 
-            Note("Could not write the log: " + ex.Message);
+            Note(_csv.Health == LogHealth.Blocked ? LogStatusText.NotSavedNote : "Row not saved: " + ex.Message);
             SaveSettings(row);
             return;
         }
 
-        var savedPath = _csv.LastSuccessfulWritePath ?? _csv.MainPath;
+        if (!string.Equals(folderBefore, _csv.Folder, StringComparison.OrdinalIgnoreCase))
+        {
+            FollowLogFolder();
+            Note(LogStatusText.MovedNote(_csv.CopiedRows));
+        }
+
         var savedAt = _csv.LastSuccessfulWriteLocal ?? DateTime.Now;
-        var flash = $"Saved row at {savedAt:HH:mm:ss} → {savedPath}";
+        var saved = LogStatusText.Saved(savedAt, where);
 
         lock (_gate)
         {
-            _lastTestUtc = DateTime.UtcNow;
             _lastError = row.Error;
             _phase = string.IsNullOrWhiteSpace(row.Error) ? "Idle" : "Last test problem: " + row.Error;
             _hops = row.Hops.ToList();
             _hopsAreAddressesOnly = false;
             _hopsRevision++;
             _logRevision++;
-            _logWriteStatus = flash;
+            _logWriteStatus = saved;
             Remember(row);
-            if (!_paused)
-                RecomputeDue();
         }
 
         SaveSettings(row);
@@ -443,7 +480,7 @@ public sealed class ProbeScheduler : IDisposable
             Note("Main log is locked. The row is in riot-route-log.pending.csv and will merge later.");
         else
             Note(string.IsNullOrWhiteSpace(row.Error)
-                ? flash
+                ? saved
                 : "Appended a row with blanks after a problem: " + row.Error);
 
         if (!_riotNoReplyNoted && LatencyLabels.RiotNoReply(row.RiotHopAvg, row.RiotHopLossPct))
@@ -500,7 +537,7 @@ public sealed class ProbeScheduler : IDisposable
 
     private void LoadFromDisk()
     {
-        var settings = SettingsStore.Load(_settingsPath);
+        var settings = SettingsStore.Load(SettingsPath);
         IReadOnlyList<RouteRow> rows;
         try
         {
@@ -530,12 +567,36 @@ public sealed class ProbeScheduler : IDisposable
             else
                 _activityLine = _paused ? "Logging is paused." : "No tests yet.";
 
-            if (_csv.LastSuccessfulWriteLocal is DateTime written && !string.IsNullOrWhiteSpace(_csv.LastSuccessfulWritePath))
-                _logWriteStatus = $"Last saved {written:HH:mm:ss} → {_csv.LastSuccessfulWritePath}";
-            else if (last != null && !string.IsNullOrWhiteSpace(last.Timestamp))
-                _logWriteStatus = $"Log has rows (last CSV timestamp {last.Timestamp}). Waiting for next write.";
-            else
-                _logWriteStatus = "Waiting for first write";
+            _logWriteStatus = LogStatusText.Waiting(last?.Timestamp);
+        }
+    }
+
+    /// <summary>Settings, activity history and crash.log go wherever the CSV now lives.</summary>
+    private void FollowLogFolder()
+    {
+        var folder = _csv.Folder;
+        if (string.Equals(folder, _activityFolder, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        CarryOver(SettingsFileName);
+        CarryOver(ActivityFileName);
+        _activityFolder = folder;
+        _activity.MoveTo(Path.Combine(folder, ActivityFileName));
+        CrashLog.Folder = folder;
+    }
+
+    private void CarryOver(string fileName)
+    {
+        try
+        {
+            var from = Path.Combine(_csv.PrimaryFolder, fileName);
+            var to = Path.Combine(_csv.Folder, fileName);
+            if (File.Exists(from) && !File.Exists(to))
+                File.Copy(from, to);
+        }
+        catch
+        {
+            // Settings and activity history are conveniences; the CSV already moved.
         }
     }
 
@@ -679,7 +740,7 @@ public sealed class ProbeScheduler : IDisposable
 
         try
         {
-            SettingsStore.Save(_settingsPath, settings);
+            SettingsStore.Save(SettingsPath, settings);
         }
         catch
         {
@@ -706,13 +767,6 @@ public sealed class ProbeScheduler : IDisposable
 
     private ProbeSnapshot BuildSnapshot(DateTime now)
     {
-        var writeError = _csv.LastWriteError ?? "";
-        if (string.IsNullOrWhiteSpace(writeError) && !string.IsNullOrWhiteSpace(_lastError)
-            && _lastError.Contains("RiotRouteLog", StringComparison.OrdinalIgnoreCase))
-        {
-            writeError = _lastError;
-        }
-
         return new ProbeSnapshot
         {
             Mode = _league ? "Every 5 min" : "Every 15 min",
@@ -730,10 +784,13 @@ public sealed class ProbeScheduler : IDisposable
             HopsRevision = _hopsRevision,
             LogRevision = _logRevision,
             Tooltip = TooltipText.Format(_tipUpstream, _tipNetwork, _tipCity, _tipRiot, _tipLastHop, _tipHandoffRtt, _tipTimestamp, now),
-            LogFolder = Paths.Folder,
-            LogFileName = "riot-route-log.csv",
+            LogFolder = _csv.Folder,
+            LogFileName = CsvLog.MainFileName,
             LogWriteStatus = _logWriteStatus,
-            LogLastError = writeError,
+            LogLastError = _csv.LastWriteError ?? "",
+            LogHealth = _csv.Health,
+            LogLocation = LogStatusText.Location(_csv.UsingFallback, _csv.MovedThisSession, _csv.CopiedRows),
+            LogUnsavedRows = _csv.UnsavedRows,
         };
     }
 

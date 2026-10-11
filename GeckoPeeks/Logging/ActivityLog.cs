@@ -26,7 +26,14 @@ public sealed class ActivityLog
         }
     }
 
-    public string Path { get; }
+    public string Path { get; private set; }
+
+    /// <summary>Later lines go to <paramref name="path"/>; the recent lines stay on screen.</summary>
+    public void MoveTo(string path)
+    {
+        lock (_gate)
+            Path = path;
+    }
 
     public IReadOnlyList<string> Recent()
     {
