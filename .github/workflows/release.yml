@@ -73,12 +73,12 @@ jobs:
           if ($tag -notmatch '^v\d+\.\d+\.\d+') {
             throw "Refusing tag '$tag'. Expected vMAJOR.MINOR.PATCH."
           }
-          if ($tag -eq "v1.0.0" -or $tag -eq "v1.0.1" -or $tag -eq "v1.0.2" -or $tag -eq "v1.0.3" -or $tag -eq "v1.0.4" -or $tag -eq "v1.0.5") {
+          if ($tag -eq "v1.0.0" -or $tag -eq "v1.0.1" -or $tag -eq "v1.0.2" -or $tag -eq "v1.0.3" -or $tag -eq "v1.0.4" -or $tag -eq "v1.0.5" -or $tag -eq "v1.0.6") {
             throw "Refusing to overwrite release $tag."
           }
 
           $notes = @"
-          Gecko Peeks $($tag.Substring(1)) — CFA log-folder messaging, sharp SmallIconSize tray icon, durability/classifier edge tests, plus all 1.0.5 hardening (RTT, pending.csv, balloons, compress publish).
+          Gecko Peeks $($tag.Substring(1)) — live hop RTT (Stopwatch + never show 0 ms for replies), summary Avg falls back LastHopAvg/HandoffRtt, in-window LOCAL LOG strip (path / Open log / Open folder / Copy path), visible v{Version} in the header.
           "@
 
           gh release view $tag --json tagName 2>$null
