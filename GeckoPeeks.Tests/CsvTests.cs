@@ -32,7 +32,7 @@ public class CsvTests
         row.LastHopHost = "+1234";
         var line = CsvFormat.FormatLine(row);
         Assert.Contains("'=cmd|'/c calc'!A1", line, StringComparison.Ordinal);
-        Assert.Contains("'"+1234", line, StringComparison.Ordinal);
+        Assert.Contains("'+1234", line, StringComparison.Ordinal);
         Assert.DoesNotContain(",=cmd", line, StringComparison.Ordinal);
     }
 
