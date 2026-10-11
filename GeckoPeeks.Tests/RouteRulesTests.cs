@@ -18,6 +18,10 @@ public class CityCodeTests
     [InlineData("www.example.com", "")]
     [InlineData("to-of.example.net", "")]
     [InlineData(null, "")]
+    [InlineData("ae5.cr1.sea1.us.zayo.com", "sea1")]
+    [InlineData("be3012.ccr31.sea02.atlas.cogentco.com", "sea02")]
+    [InlineData("100ge0-45.core1.sea1.he.net", "sea1")]
+    [InlineData("ae5.ccr31.core1.example.net", "")]
     public void Extracts_the_first_city_token(string? hostname, string expected) =>
         Assert.Equal(expected, CityCode.Extract(hostname));
 }
@@ -73,6 +77,21 @@ public class RouteClassifierTests
     }
 
     [Fact]
+    public void Substring_false_positives_are_rejected()
+    {
+        Assert.Empty(RouteClassifier.ClassifyHop("cdn.the.net").Networks);
+        Assert.Empty(RouteClassifier.ClassifyHop("img.cache.net").Networks);
+        Assert.Empty(RouteClassifier.ClassifyHop("www.apache.net").Networks);
+        Assert.Empty(RouteClassifier.ClassifyHop("notelia.example.com").Networks);
+        Assert.Empty(RouteClassifier.ClassifyHop("hotelus.example.com").Networks);
+
+        Assert.Contains("HE", RouteClassifier.ClassifyHop("core1.sea1.he.net").Networks);
+        Assert.Contains("TELUS", RouteClassifier.ClassifyHop("yyc2.telus.net").Networks);
+        Assert.Contains("Telia", RouteClassifier.ClassifyHop("sea-b1-link.ip.twelve99.net").Networks);
+        Assert.Contains("Telia", RouteClassifier.ClassifyHop("peer.zayo-telia.zayo.com").Networks);
+    }
+
+    [Fact]
     public void Full_path_keeps_stars_for_silent_hops()
     {
         var hops = new[]
@@ -119,5 +138,17 @@ public class TooltipAndBalloonTests
         Assert.Equal("Route changed: Zayo/Denver → Zayo/Seattle", changed);
 
         Assert.Null(RouteChange.Describe(true, "Zayo", "sea1", "Telia", "Zayo", "sea1", "Cogent"));
+    }
+
+    [Fact]
+    public void Balloon_ignores_unknown_or_blank_probe_flaps()
+    {
+        Assert.Null(RouteChange.Describe(true, "Zayo", "sea1", "Telia", "Unknown", "", ""));
+        Assert.Null(RouteChange.Describe(true, "Zayo", "sea1", "Telia", "", "", ""));
+        Assert.Null(RouteChange.Describe(true, "Unknown", "", "", "Zayo", "sea1", "Telia"));
+        Assert.Null(RouteChange.Describe(true, "Zayo", "sea1", "Telia", "Unknown", "Unknown", ""));
+
+        var real = RouteChange.Describe(true, "Zayo", "sea1", "Telia", "Cogent", "den3", "Telia");
+        Assert.Equal("Route changed: Zayo/Seattle → Cogent/Denver", real);
     }
 }
