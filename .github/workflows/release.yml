@@ -2,6 +2,8 @@ name: Release
 
 on:
   push:
+    branches:
+      - main
     tags:
       - "v*"
   workflow_dispatch:
@@ -30,12 +32,26 @@ jobs:
         working-directory: GeckoPeeks
         run: dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
 
-      - name: Upload GeckoPeeks.exe
-        uses: softprops/action-gh-release@v2
-        with:
-          files: GeckoPeeks/bin/Release/net8.0-windows/win-x64/publish/GeckoPeeks.exe
-          draft: false
-          prerelease: false
-          fail_on_unmatched_files: true
+      - name: Create or update release v1.0.0
+        shell: pwsh
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = "Continue"
+          $PSNativeCommandUseErrorActionPreference = $false
+          $exe = Join-Path (Get-Location) "GeckoPeeks\bin\Release\net8.0-windows\win-x64\publish\GeckoPeeks.exe"
+          if (-not (Test-Path -LiteralPath $exe)) {
+            throw "Published exe was not found at $exe"
+          }
+
+          gh release view v1.0.0 --json tagName
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload v1.0.0 $exe --clobber
+          }
+          else {
+            gh release create v1.0.0 $exe --title "v1.0.0" --notes "Gecko Peeks 1.0.0"
+          }
+
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
