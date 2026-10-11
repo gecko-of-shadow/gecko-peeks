@@ -112,6 +112,7 @@ internal sealed class MainForm : Form
         WindowState = FormWindowState.Normal;
         Activate();
         BringToFront();
+        BindLog();
     }
 
     public void ExitApplication()
@@ -167,7 +168,9 @@ internal sealed class MainForm : Form
         if (snapshot.LogRevision != _logRevision)
         {
             _logRevision = snapshot.LogRevision;
-            BindLog();
+            // Skip full CSV parse while hidden; refresh when the window is shown.
+            if (Visible)
+                BindLog();
         }
     }
 
@@ -284,30 +287,12 @@ internal sealed class MainForm : Form
             return;
         }
 
-        var groups = new Dictionary<string, (int Count, List<double> Avgs)>(StringComparer.OrdinalIgnoreCase);
-        foreach (var row in rows)
+        foreach (var row in UpstreamSummary.Build(rows))
         {
-            var key = string.IsNullOrWhiteSpace(row.Upstream) ? "Unknown" : row.Upstream;
-            if (!groups.TryGetValue(key, out var bucket))
-            {
-                bucket = (0, new List<double>());
-                groups[key] = bucket;
-            }
-
-            bucket.Count++;
-            if (double.TryParse(row.RiotHopAvg, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var avg))
-                bucket.Avgs.Add(avg);
-            groups[key] = bucket;
-        }
-
-        foreach (var pair in groups.OrderByDescending(pair => pair.Value.Count))
-        {
-            var share = (100.0 * pair.Value.Count / rows.Count).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + "%";
-            var samples = pair.Value.Avgs;
-            var avg = samples.Count == 0
-                ? "\u2014"
-                : Math.Round(samples.Average()).ToString(System.Globalization.CultureInfo.InvariantCulture);
-            _summaryGrid.Rows.Add(pair.Key, share, avg);
+            _summaryGrid.Rows.Add(
+                row.Upstream,
+                UpstreamSummary.SharePercent(row.Count, rows.Count),
+                row.AvgMs);
         }
 
         _summaryEmpty.Visible = false;
