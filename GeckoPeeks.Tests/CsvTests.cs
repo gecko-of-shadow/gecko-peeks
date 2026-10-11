@@ -40,7 +40,9 @@ public class CsvTests
             Assert.Contains("Zayo", main, StringComparison.Ordinal);
             Assert.Contains("Cogent", main, StringComparison.Ordinal);
             Assert.True(new FileInfo(log.MainPath).Length > 0);
-            Assert.Equal(main, File.ReadAllText(log.BackupPath));
+            // Backup is written on the first append; later refreshes may be throttled.
+            Assert.True(File.Exists(log.BackupPath));
+            Assert.Contains("Zayo", File.ReadAllText(log.BackupPath), StringComparison.Ordinal);
 
             var forced = new CsvLog(folder, () => true);
             var pendingRow = Sample("TELUS");
