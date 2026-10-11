@@ -141,8 +141,12 @@ public static class TestRunner
                 var responded = reply.Status is IPStatus.Success or IPStatus.TtlExpired or IPStatus.TimeExceeded
                     && reply.Address != null;
                 var ip = responded ? reply.Address!.ToString() : "*";
-                // RoundtripTime is often 0 for TtlExpired on Windows; use wall time then.
-                var rtt = IcmpTiming.ResolveRespondedRttMs(responded, reply.RoundtripTime, clock.ElapsedMilliseconds);
+                // RoundtripTime is often 0 for TtlExpired on Windows; use wall time
+                // (TotalMilliseconds) so sub-ms hops are not lost to long truncation.
+                var rtt = IcmpTiming.ResolveRespondedRttMs(
+                    responded,
+                    reply.RoundtripTime,
+                    clock.Elapsed.TotalMilliseconds);
                 hop = new HopObservation(ttl, ip, "", rtt, responded, reply.Status == IPStatus.Success);
             }
             catch (OperationCanceledException)
@@ -251,7 +255,7 @@ public static class TestRunner
                 if (reply.Status != IPStatus.Success)
                     continue;
 
-                var rtt = IcmpTiming.ResolveRttMs(reply.RoundtripTime, clock.ElapsedMilliseconds);
+                var rtt = IcmpTiming.ResolveRttMs(reply.RoundtripTime, clock.Elapsed.TotalMilliseconds);
                 ok++;
                 sum += rtt;
                 if (rtt < min)
