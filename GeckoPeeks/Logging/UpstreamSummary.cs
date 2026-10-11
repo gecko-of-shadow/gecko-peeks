@@ -2,8 +2,8 @@ namespace GeckoPeeks.Logging;
 
 /// <summary>
 /// Aggregates CSV rows for the upstream summary grid.
-/// Prefers RiotHopAvg; falls back to LastHopAvg when Riot is blank but a
-/// measured average exists so the UI does not show "\u2014" for a real sample.
+/// Prefers RiotHopAvg, then LastHopAvg, then HandoffRttMs. Never shows
+/// "\u2014" when any of those fields parse as a number on the rows.
 /// </summary>
 public static class UpstreamSummary
 {
@@ -14,20 +14,19 @@ public static class UpstreamSummary
         if (rows.Count == 0)
             return Array.Empty<Row>();
 
-        var groups = new Dictionary<string, (int Count, List<double> Avgs)>(StringComparer.OrdinalIgnoreCase);
+        var groups = new Dictionary<string, GroupBucket>(StringComparer.OrdinalIgnoreCase);
         foreach (var row in rows)
         {
-            var key = string.IsNullOrWhiteSpace(row.Upstream) ? "Unknown" : row.Upstream;
+            var key = string.IsNullOrWhiteSpace(row.Upstream) ? "Unknown" : row.Upstream.Trim();
             if (!groups.TryGetValue(key, out var bucket))
             {
-                bucket = (0, new List<double>());
+                bucket = new GroupBucket();
                 groups[key] = bucket;
             }
 
             bucket.Count++;
             if (TryAverageMs(row, out var avg))
                 bucket.Avgs.Add(avg);
-            groups[key] = bucket;
         }
 
         var list = new List<Row>();
@@ -50,6 +49,9 @@ public static class UpstreamSummary
         return (100.0 * count / total).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + "%";
     }
 
+    /// <summary>
+    /// RiotHopAvg, else LastHopAvg, else HandoffRttMs.
+    /// </summary>
     public static bool TryAverageMs(RouteRow row, out double avg)
     {
         if (TryParseMs(row.RiotHopAvg, out avg))
@@ -67,10 +69,27 @@ public static class UpstreamSummary
         value = 0;
         if (string.IsNullOrWhiteSpace(text))
             return false;
+
+        var trimmed = text.Trim();
+        if (trimmed.EndsWith("ms", StringComparison.OrdinalIgnoreCase))
+            trimmed = trimmed[..^2].Trim();
+        if (trimmed.Length == 0)
+            return false;
+
+        // Em dash / placeholders are not averages.
+        if (trimmed == "\u2014" || trimmed == "-" || trimmed.Equals("n/a", StringComparison.OrdinalIgnoreCase))
+            return false;
+
         return double.TryParse(
-            text.Trim(),
+            trimmed,
             System.Globalization.NumberStyles.Float,
             System.Globalization.CultureInfo.InvariantCulture,
             out value);
+    }
+
+    private sealed class GroupBucket
+    {
+        public int Count;
+        public List<double> Avgs { get; } = new();
     }
 }
