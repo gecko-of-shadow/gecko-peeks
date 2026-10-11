@@ -12,13 +12,17 @@ public static class RouteClassifier
 {
     public const string Unknown = "Unknown";
 
-    private static readonly (string Pattern, string Name)[] UpstreamPatterns =
+    private static readonly (string Domain, string Name)[] OfficialDomains =
     {
         ("zayo.com", "Zayo"),
         ("cogentco.com", "Cogent"),
-        ("telus", "TELUS"),
-        ("wolfpaw", "Wolfpaw"),
+        ("telus.net", "TELUS"),
+        ("telus.com", "TELUS"),
+        ("wolfpaw.net", "Wolfpaw"),
         ("he.net", "HE"),
+        ("twelve99.net", "Telia"),
+        ("telia.net", "Telia"),
+        ("telia.com", "Telia"),
     };
 
     public sealed record Features(
@@ -98,25 +102,27 @@ public static class RouteClassifier
         }
 
         string? official = null;
-        foreach (var (pattern, name) in UpstreamPatterns)
+        foreach (var (domain, name) in OfficialDomains)
         {
-            if (!host.Contains(pattern, StringComparison.Ordinal))
+            if (!HostMatchesDomain(host, domain))
                 continue;
             Add(name);
-            official ??= name;
+            // Pure upstream is limited to the five ISP patterns, not Telia.
+            if (official == null && name != "Telia")
+                official = name;
         }
 
-        // Stems catch a handoff hostname that names a provider without the
-        // official domain, e.g. "zayo-telia" (no "zayo.com") plus Telia.
-        if (host.Contains("zayo", StringComparison.Ordinal))
+        // Stem matches for mixed handoff names (zayo-telia) and TELUS/Wolfpaw
+        // hostnames that omit the full corporate domain. Anchored to label boundaries.
+        if (LabelContains(host, "zayo"))
             Add("Zayo");
-        if (host.Contains("cogent", StringComparison.Ordinal))
+        if (LabelContains(host, "cogent"))
             Add("Cogent");
-        if (host.Contains("telus", StringComparison.Ordinal))
+        if (LabelContains(host, "telus"))
             Add("TELUS");
-        if (host.Contains("wolfpaw", StringComparison.Ordinal))
+        if (LabelContains(host, "wolfpaw"))
             Add("Wolfpaw");
-        if (host.Contains("twelve99.net", StringComparison.Ordinal) || host.Contains("telia", StringComparison.Ordinal))
+        if (LabelContains(host, "telia") || LabelContains(host, "twelve99"))
             Add("Telia");
 
         string? pure = null;
@@ -137,6 +143,54 @@ public static class RouteClassifier
         }
 
         return new HopClass(networks, pure);
+    }
+
+    /// <summary>
+    /// True when host equals domain or ends with ".domain".
+    /// </summary>
+    public static bool HostMatchesDomain(string host, string domain)
+    {
+        if (string.IsNullOrEmpty(host) || string.IsNullOrEmpty(domain))
+            return false;
+
+        if (host.Equals(domain, StringComparison.Ordinal))
+            return true;
+
+        return host.EndsWith("." + domain, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// True when a '.' / '-' separated label equals stem or starts with stem
+    /// followed by a non-letter (for example zayo-telia, telus2).
+    /// </summary>
+    public static bool LabelContains(string host, string stem)
+    {
+        if (string.IsNullOrEmpty(host) || string.IsNullOrEmpty(stem))
+            return false;
+
+        var index = 0;
+        while (index < host.Length)
+        {
+            var nextDot = host.IndexOf('.', index);
+            var nextDash = host.IndexOf('-', index);
+            var end = host.Length;
+            if (nextDot >= 0)
+                end = Math.Min(end, nextDot);
+            if (nextDash >= 0)
+                end = Math.Min(end, nextDash);
+
+            var length = end - index;
+            if (length >= stem.Length &&
+                string.Compare(host, index, stem, 0, stem.Length, StringComparison.Ordinal) == 0 &&
+                (length == stem.Length || !char.IsLetter(host[index + stem.Length])))
+            {
+                return true;
+            }
+
+            index = end + 1;
+        }
+
+        return false;
     }
 
     public static string DescribeHop(string? hostname)
