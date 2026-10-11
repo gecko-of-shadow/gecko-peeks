@@ -139,4 +139,65 @@ public class PendingLogTests
             }
         }
     }
+
+    [Fact]
+    public async Task ReadAll_does_not_throw_while_append_holds_the_writer()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "gecko-peeks-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        try
+        {
+            var log = new CsvLog(folder);
+            Assert.Equal(AppendResult.Main, log.Append(new RouteRow
+            {
+                Timestamp = "2026-10-11 12:00:00",
+                Upstream = "Zayo",
+                RiotHopAvg = "61",
+                FullPath = "1.1.1.1 > 192.207.0.5",
+            }));
+
+            Exception? readError = null;
+            var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var reader = Task.Run(() =>
+            {
+                started.TrySetResult();
+                try
+                {
+                    for (var i = 0; i < 40; i++)
+                        _ = log.ReadAll();
+                }
+                catch (Exception ex)
+                {
+                    readError = ex;
+                }
+            });
+
+            await started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            for (var i = 0; i < 20; i++)
+            {
+                log.Append(new RouteRow
+                {
+                    Timestamp = $"2026-10-11 12:00:{i:00}",
+                    Upstream = "Zayo",
+                    RiotHopAvg = "60",
+                    FullPath = "1.1.1.1 > 192.207.0.5",
+                });
+            }
+
+            await reader.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Null(readError);
+            Assert.True(log.ReadAll().Count >= 1);
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+            catch
+            {
+                // Temp only.
+            }
+        }
+    }
 }
