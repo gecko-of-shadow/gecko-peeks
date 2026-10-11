@@ -5,9 +5,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWindowsForms>true</UseWindowsForms>
-    <!-- Lets `dotnet publish -r win-x64` compile on Linux as well as Windows. -->
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
-    <!-- Keep the published app one exe. Native desktop DLLs extract beside the process at runtime. -->
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <CopyOutputSymbolsToPublishDirectory>false</CopyOutputSymbolsToPublishDirectory>
     <AssemblyName>GeckoPeeks</AssemblyName>
@@ -20,4 +18,10 @@
     <ApplicationIcon>Assets\gecko-peeks.ico</ApplicationIcon>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
   </PropertyGroup>
+
+  <!-- Always rebuild the Win32 icon from the committed base64 (certutil is on windows-latest). -->
+  <Target Name="MaterializeApplicationIcon" BeforeTargets="PrepareForBuild"
+          Condition="Exists('$(MSBuildProjectDirectory)\Assets\gecko-peeks.ico.b64')">
+    <Exec Command="certutil -decode &quot;$(MSBuildProjectDirectory)\Assets\gecko-peeks.ico.b64&quot; &quot;$(MSBuildProjectDirectory)\Assets\gecko-peeks.ico&quot;" />
+  </Target>
 </Project>

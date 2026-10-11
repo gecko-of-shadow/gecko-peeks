@@ -23,6 +23,16 @@ jobs:
         with:
           dotnet-version: "8.0.x"
 
+      - name: Materialize application icon
+        shell: pwsh
+        run: |
+          $b64 = "GeckoPeeks/Assets/gecko-peeks.ico.b64"
+          $ico = "GeckoPeeks/Assets/gecko-peeks.ico"
+          if (-not (Test-Path -LiteralPath $b64)) { throw "Missing $b64" }
+          certutil -decode $b64 $ico
+          if (-not (Test-Path -LiteralPath $ico)) { throw "Icon decode failed" }
+          (Get-Item -LiteralPath $ico).Length
+
       - name: Test
         shell: pwsh
         run: dotnet test -c Release
@@ -54,15 +64,10 @@ jobs:
 
           gh release view $tag --json tagName
           if ($LASTEXITCODE -eq 0) {
-            if ($env:GITHUB_REF_TYPE -eq "tag") {
-              gh release upload $tag $exe --clobber
-            }
-            else {
-              Write-Host "Release $tag already exists; skipping branch republish."
-            }
+            gh release upload $tag $exe --clobber
           }
           else {
-            gh release create $tag $exe --title $tag --notes "Gecko Peeks 1.0.1 — embedded multi-size gecko icon (16/32/48/256) for Explorer, shortcuts, and the taskbar. Window header subtitle renders cleanly at 100%/125%/150% DPI. Start with Windows unchanged."
+            gh release create $tag $exe --title $tag --notes "Gecko Peeks 1.0.1 — embedded multi-size gecko icon for Explorer, shortcuts, and the taskbar. Header subtitle renders cleanly at common DPI scales. Start with Windows unchanged."
           }
 
           if ($LASTEXITCODE -ne 0) {
