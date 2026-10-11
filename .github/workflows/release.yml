@@ -32,7 +32,7 @@ jobs:
         working-directory: GeckoPeeks
         run: dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
 
-      - name: Create or update release v1.0.0
+      - name: Create release v1.0.1
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -44,12 +44,25 @@ jobs:
             throw "Published exe was not found at $exe"
           }
 
-          gh release view v1.0.0 --json tagName
+          $tag = "v1.0.1"
+          if ($env:GITHUB_REF_TYPE -eq "tag") {
+            $tag = $env:GITHUB_REF_NAME
+          }
+          if ($tag -eq "v1.0.0") {
+            throw "Refusing to overwrite release v1.0.0."
+          }
+
+          gh release view $tag --json tagName
           if ($LASTEXITCODE -eq 0) {
-            gh release upload v1.0.0 $exe --clobber
+            if ($env:GITHUB_REF_TYPE -eq "tag") {
+              gh release upload $tag $exe --clobber
+            }
+            else {
+              Write-Host "Release $tag already exists; skipping branch republish."
+            }
           }
           else {
-            gh release create v1.0.0 $exe --title "v1.0.0" --notes "Gecko Peeks 1.0.0"
+            gh release create $tag $exe --title $tag --notes "Gecko Peeks 1.0.1 — embedded multi-size gecko icon (16/32/48/256) for Explorer, shortcuts, and the taskbar. Window header subtitle renders cleanly at 100%/125%/150% DPI. Start with Windows unchanged."
           }
 
           if ($LASTEXITCODE -ne 0) {

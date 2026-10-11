@@ -1,4 +1,5 @@
 using System.Drawing.Drawing2D;
+using System.Runtime.InteropServices;
 
 namespace GeckoPeeks.Ui;
 
@@ -41,9 +42,40 @@ internal static class GeckoMark
         return bitmap;
     }
 
+    /// <summary>
+    /// Prefer the Win32 icon embedded via ApplicationIcon (Explorer / shortcuts / taskbar),
+    /// then fall back to the drawn mark for design-time or odd hosts.
+    /// </summary>
     public static Icon CreateIcon()
     {
+        try
+        {
+            var path = Application.ExecutablePath;
+            if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
+            {
+                using var associated = Icon.ExtractAssociatedIcon(path);
+                if (associated != null)
+                    return (Icon)associated.Clone();
+            }
+        }
+        catch
+        {
+            // Fall back to the drawn mark.
+        }
+
         using var bitmap = CreateBitmap(32);
-        return Icon.FromHandle(bitmap.GetHicon());
+        var handle = bitmap.GetHicon();
+        try
+        {
+            using var temp = Icon.FromHandle(handle);
+            return (Icon)temp.Clone();
+        }
+        finally
+        {
+            _ = DestroyIcon(handle);
+        }
     }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool DestroyIcon(IntPtr hIcon);
 }

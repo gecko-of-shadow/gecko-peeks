@@ -11,7 +11,7 @@ Set-Location GeckoPeeks
 dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
 ```
 
-The executable is `GeckoPeeks\bin\Release\net8.0-windows\win-x64\publish\GeckoPeeks.exe`. It is a single-file self-contained win-x64 app and does not need administrator rights.
+The executable is `GeckoPeeks\bin\Release\net8.0-windows\win-x64\publish\GeckoPeeks.exe`. It is a single-file self-contained win-x64 app and does not need administrator rights. The publish step embeds `Assets\gecko-peeks.ico` (multi-size 16/32/48/256) so Explorer, shortcuts, and the taskbar show the gecko.
 
 Run it:
 
@@ -32,6 +32,8 @@ Join-Path $env:USERPROFILE "Documents\RiotRouteLog\riot-route-log.csv"
 ```
 
 That folder also holds `riot-route-log.pending.csv` (used when Excel has the main file open), `riot-route-log.backup.csv`, `gecko-peeks-settings.json`, and a capped `activity.log`. The main CSV is append-only.
+
+If Windows Controlled folder access blocks Documents, allow `GeckoPeeks.exe` under ransomware protection or the log stays empty.
 
 ## Start with Windows
 
