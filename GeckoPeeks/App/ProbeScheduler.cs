@@ -352,15 +352,26 @@ public sealed class ProbeScheduler : IDisposable
         });
 
         var row = await TestRunner.RunAsync(league, progress, cancellationToken).ConfigureAwait(false);
-        if (row.Cancelled && !row.HasMeasuredData())
+        if (row.Cancelled)
         {
+            // Cancelled probes are not finished samples. Do not append a partial
+            // row (blank Riot stats) that would skew the upstream summary.
             lock (_gate)
             {
                 _phase = "Idle";
                 _lastError = "";
+                if (row.Hops.Count > 0)
+                {
+                    _hops = row.Hops.ToList();
+                    _hopsAreAddressesOnly = false;
+                    _hopsRevision++;
+                }
             }
 
-            Note("Test cancelled before it recorded anything.");
+            Note(row.HasMeasuredData()
+                ? "Test cancelled; partial result was not written to the CSV."
+                : "Test cancelled before it recorded anything.");
+            Publish();
             return;
         }
 

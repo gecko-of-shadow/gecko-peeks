@@ -56,10 +56,26 @@ internal static class CrashLog
             Directory.CreateDirectory(folder);
             var path = Path.Combine(folder, "crash.log");
             File.AppendAllText(path, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss}  {exception}{Environment.NewLine}");
+            TrimCrashLog(path);
         }
         catch
         {
             // A failed crash log must not throw again.
         }
+    }
+
+    private static void TrimCrashLog(string path)
+    {
+        const int maxBytes = 256 * 1024;
+        const int keepLines = 200;
+        var info = new FileInfo(path);
+        if (!info.Exists || info.Length < maxBytes)
+            return;
+
+        var lines = File.ReadAllLines(path);
+        if (lines.Length <= keepLines)
+            return;
+
+        File.WriteAllLines(path, lines[^keepLines..]);
     }
 }
