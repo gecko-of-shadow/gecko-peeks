@@ -40,7 +40,7 @@ jobs:
       - name: Publish
         shell: pwsh
         working-directory: GeckoPeeks
-        run: dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
+        run: dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -v:n
 
       - name: Create release v1.0.1
         shell: pwsh
