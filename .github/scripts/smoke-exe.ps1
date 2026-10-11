@@ -1,7 +1,8 @@
 <#
 Launches the published GeckoPeeks.exe on a GitHub Windows runner and checks that it opens,
 stays open, closes to the tray, reopens from the tray icon and from a second launch, starts
-hidden with --tray, repoints a stale Start with Windows value, and logs no crash. Then it denies
+hidden with --tray, repoints a stale Start with Windows value, draws every label and button whole
+(inside its panel, no text cut at the bottom edge, no overlaps), and logs no crash. Then it denies
 writes to Documents\RiotRouteLog the way Controlled folder access does and checks that the log
 moves to %LOCALAPPDATA%\GeckoPeeks\RiotRouteLog with its rows, and that the window says Blocked
 when neither folder accepts writes. Timings, window text, results and screenshots go to the job
@@ -363,6 +364,114 @@ function StripLayout([IntPtr]$Form) {
     [pscustomobject]@{ Problems = $problems; Detail = ($details -join " | ") }
 }
 
+# One render of the whole window (through DWM, so windows on top do not matter) with the form's
+# screen rectangle, which maps control rectangles onto the bitmap.
+function FormBitmap([IntPtr]$Form) {
+    $formRect = RectOf $Form
+    if ($null -eq $formRect) { return $null }
+    $width = $formRect.Right - $formRect.Left
+    $height = $formRect.Bottom - $formRect.Top
+    if ($width -le 0 -or $height -le 0) { return $null }
+    $bitmap = New-Object System.Drawing.Bitmap $width, $height
+    $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+    $hdc = $graphics.GetHdc()
+    $printed = [SmokeWin32]::PrintWindow($Form, $hdc, $PW_RENDERFULLCONTENT)
+    $graphics.ReleaseHdc($hdc)
+    if (-not $printed) { $graphics.CopyFromScreen($formRect.Left, $formRect.Top, 0, 0, $bitmap.Size) }
+    $graphics.Dispose()
+    return [pscustomobject]@{ Bitmap = $bitmap; Rect = $formRect }
+}
+
+# Every visible label and button with text must sit inside each of its ancestors (Windows clips a
+# child to its parent) and must not overlap a sibling label or button. Each label's bottom pixel
+# row must also be free of text: a box too small for its font cuts the text short and leaves ink
+# on that row, which is how v1.0.10 lost the bottom of the chip captions at 125% scaling. The
+# label's background is the most common colour across its top, middle and bottom rows.
+function LabelLayout([IntPtr]$Form) {
+    $problems = [System.Collections.Generic.List[string]]::new()
+    $labels = 0
+    $buttons = 0
+    $capture = FormBitmap $Form
+    if ($null -eq $capture) {
+        $problems.Add("could not render the window")
+        return [pscustomobject]@{ Problems = $problems; Detail = "" }
+    }
+
+    try {
+        $bitmap = $capture.Bitmap
+        $formRect = $capture.Rect
+        $controls = [System.Collections.Generic.List[object]]::new()
+        foreach ($handle in [SmokeWin32]::Descendants($Form)) {
+            $class = [SmokeWin32]::ClassOf($handle)
+            $isLabel = $class -like "*.STATIC.*"
+            if (-not $isLabel -and $class -notlike "*.BUTTON.*") { continue }
+            if (-not [SmokeWin32]::IsWindowVisible($handle)) { continue }
+            $text = [SmokeWin32]::TextOf($handle)
+            if (-not $text) { continue }
+            $rect = RectOf $handle
+            if ($null -eq $rect -or $rect.Bottom -le $rect.Top -or $rect.Right -le $rect.Left) { continue }
+            $name = if ($text.Length -gt 40) { $text.Substring(0, 40) + "..." } else { $text }
+            $controls.Add([pscustomobject]@{ Handle = $handle; Name = $name; Rect = $rect; IsLabel = $isLabel; Parent = [SmokeWin32]::GetParent($handle) })
+        }
+
+        foreach ($control in $controls) {
+            $rect = $control.Rect
+            $name = $control.Name
+            if ($control.IsLabel) { $labels++ } else { $buttons++ }
+
+            $parent = $control.Parent
+            for ($depth = 0; $depth -lt 10 -and $parent -ne [IntPtr]::Zero; $depth++) {
+                $outer = RectOf $parent
+                if ($null -ne $outer -and -not (Inside $rect $outer)) {
+                    $problems.Add("'$name' ($($rect.Left),$($rect.Top))-($($rect.Right),$($rect.Bottom)) leaves its parent ($($outer.Left),$($outer.Top))-($($outer.Right),$($outer.Bottom))")
+                    break
+                }
+                if ($parent -eq $Form) { break }
+                $parent = [SmokeWin32]::GetParent($parent)
+            }
+
+            foreach ($other in $controls) {
+                if ($other.Parent -ne $control.Parent -or $other.Handle.ToInt64() -le $control.Handle.ToInt64()) { continue }
+                $otherRect = $other.Rect
+                if ($rect.Left -lt $otherRect.Right -and $otherRect.Left -lt $rect.Right -and $rect.Top -lt $otherRect.Bottom -and $otherRect.Top -lt $rect.Bottom) {
+                    $problems.Add("'$name' overlaps '$($other.Name)'")
+                }
+            }
+
+            if (-not $control.IsLabel) { continue }
+            $left = [Math]::Max(0, $rect.Left - $formRect.Left)
+            $right = [Math]::Min($bitmap.Width, $rect.Right - $formRect.Left)
+            $top = [Math]::Max(0, $rect.Top - $formRect.Top)
+            $bottom = [Math]::Min($bitmap.Height, $rect.Bottom - $formRect.Top) - 1
+            if ($right -le $left -or $bottom -le $top) { continue }
+
+            $counts = @{}
+            foreach ($y in @($top, [int](($top + $bottom) / 2), $bottom)) {
+                for ($x = $left; $x -lt $right; $x++) {
+                    $key = $bitmap.GetPixel($x, $y).ToArgb()
+                    $counts[$key] = 1 + [int]$counts[$key]
+                }
+            }
+            $background = [System.Drawing.Color]::FromArgb([int](($counts.GetEnumerator() | Sort-Object Value -Descending | Select-Object -First 1).Key))
+
+            $ink = 0
+            for ($x = $left; $x -lt $right; $x++) {
+                $pixel = $bitmap.GetPixel($x, $bottom)
+                $distance = [Math]::Abs($pixel.R - $background.R) + [Math]::Abs($pixel.G - $background.G) + [Math]::Abs($pixel.B - $background.B)
+                if ($distance -gt 48) { $ink++ }
+            }
+            if ($ink -gt 0) {
+                $problems.Add("'$name' has text on its bottom pixel row ($ink px of $($right - $left); box $($rect.Right - $rect.Left)x$($rect.Bottom - $rect.Top))")
+            }
+        }
+    }
+    finally {
+        $capture.Bitmap.Dispose()
+    }
+
+    [pscustomobject]@{ Problems = $problems; Detail = "$labels labels and $buttons buttons checked: inside their panels, no overlaps, no text on a bottom row" }
+}
+
 # UI Automation Invoke runs the button's Click on the app's UI thread. BM_CLICK is the fallback.
 function Press([IntPtr]$Form, [string]$Text) {
     $button = ControlWithText $Form $Text "*.BUTTON.*"
@@ -544,6 +653,9 @@ try {
     $layout = StripLayout $form
     Check "LOCAL LOG caption and buttons are drawn whole" ($layout.Problems.Count -eq 0) ($layout.Problems -join "; ")
     Notice "layout" $layout.Detail
+    $labels = LabelLayout $form
+    Check "Every label and button is drawn whole (no text cut at the bottom edge, no overlaps)" ($labels.Problems.Count -eq 0) ($labels.Problems -join "; ")
+    Notice "labels" $labels.Detail
     Screenshot "smoke-window.png"
 
     $handoff = [System.Diagnostics.Stopwatch]::StartNew()
@@ -636,6 +748,8 @@ try {
     Check "No 'Could not find file' text in the window" (-not ($view.Texts -match "Could not find file"))
     Check "Logging chip stays On while AppData accepts writes" ($view.Chip -eq "On") $view.Chip
     Notice "log moved" "Logging=$($view.Chip) | File=$($view.File) | $($view.Status)"
+    $labels = LabelLayout $form
+    Check "Every label is drawn whole with the two-line status showing" ($labels.Problems.Count -eq 0) ($labels.Problems -join "; ")
     Screenshot "smoke-cfa-moved.png"
 
     $copyHow = Press $form "Copy path"
