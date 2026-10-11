@@ -24,6 +24,8 @@ public static class TestRunner
     public const int HopTimeoutMs = 1000;
     public const int DnsTimeoutMs = 800;
     public const int PingCount = 10;
+    /// <summary>Stop traceroute after this many silent hops past the last responder (or from the start).</summary>
+    public const int MaxConsecutiveSilentHops = 5;
 
     public static async Task<RouteRow> RunAsync(
         bool leagueRunning,
@@ -58,6 +60,13 @@ public static class TestRunner
         var hops = await TracerouteAsync(progress, cancellationToken).ConfigureAwait(false);
         row.Hops = hops;
         row.FullPath = RouteClassifier.BuildFullPath(hops);
+
+        if (hops.Count > 0 && hops.All(hop => !hop.Responded))
+        {
+            row.Error = "No hops responded (offline or filtered ICMP).";
+            Report(progress, row.Error, hops);
+            return;
+        }
 
         var features = RouteClassifier.Classify(hops);
         row.Upstream = features.Upstream;
@@ -109,6 +118,7 @@ public static class TestRunner
 
         using var ping = new Ping();
         var buffer = new byte[32];
+        var silentStreak = 0;
 
         for (var ttl = 1; ttl <= MaxHops; ttl++)
         {
@@ -148,6 +158,18 @@ public static class TestRunner
             Report(progress, hop.ReachedTarget ? "Reached target" : $"Hop {ttl}/{MaxHops}", hops);
             if (hop.ReachedTarget)
                 break;
+
+            if (hop.Responded)
+                silentStreak = 0;
+            else
+            {
+                silentStreak++;
+                if (silentStreak >= MaxConsecutiveSilentHops)
+                {
+                    Report(progress, "Stopped after consecutive silent hops", hops);
+                    break;
+                }
+            }
         }
 
         for (var i = 0; i < hops.Count; i++)

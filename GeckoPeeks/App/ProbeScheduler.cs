@@ -375,6 +375,22 @@ public sealed class ProbeScheduler : IDisposable
             return;
         }
 
+        if (row.Hops.Count > 0 && row.Hops.All(hop => !hop.Responded))
+        {
+            lock (_gate)
+            {
+                _phase = "Idle";
+                _lastError = string.IsNullOrWhiteSpace(row.Error) ? "No hops responded." : row.Error;
+                _hops = row.Hops.ToList();
+                _hopsAreAddressesOnly = false;
+                _hopsRevision++;
+            }
+
+            Note("No hops responded; nothing was written to the CSV.");
+            Publish();
+            return;
+        }
+
         AppendResult where;
         try
         {
