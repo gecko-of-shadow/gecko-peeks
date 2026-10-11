@@ -46,4 +46,16 @@ public static class CityNames
 
         return code;
     }
+
+    public static bool IsKnownCode(string? code)
+    {
+        if (string.IsNullOrWhiteSpace(code))
+            return false;
+
+        if (Names.ContainsKey(code))
+            return true;
+
+        var letters = new string(code.TakeWhile(char.IsLetter).ToArray());
+        return letters.Length > 0 && Names.ContainsKey(letters);
+    }
 }
