@@ -7,6 +7,7 @@ on:
       - main
     paths:
       - ".github/workflows/ship-v109.yml"
+      - ".github/scripts/smoke-exe.ps1"
 
 permissions:
   contents: write

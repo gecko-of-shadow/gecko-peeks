@@ -127,6 +127,7 @@ $charcoal = @(28, 34, 30)
 $results = [System.Collections.Generic.List[object]]::new()
 $failures = [System.Collections.Generic.List[string]]::new()
 $denied = [System.Collections.Generic.List[string]]::new()
+$readFailures = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 $userSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 
 function Check([string]$Name, [bool]$Ok, [string]$Detail = "") {
@@ -163,7 +164,8 @@ function WindowShown([System.Diagnostics.Process]$Process) {
 function WaitUntil([scriptblock]$Condition, [int]$TimeoutMs) {
     $clock = [System.Diagnostics.Stopwatch]::StartNew()
     while ($clock.ElapsedMilliseconds -lt $TimeoutMs) {
-        if (& $Condition) { return [int]$clock.ElapsedMilliseconds }
+        $met = try { & $Condition } catch { $false }
+        if ($met) { return [int]$clock.ElapsedMilliseconds }
         Start-Sleep -Milliseconds 200
     }
     return -1
@@ -373,10 +375,13 @@ function CloseExplorerAt([string]$Folder) {
 
 # Controlled folder access lets an app read a protected folder but not create, change, rename or
 # delete files in it. A deny ACE for this user on those rights is the closest stand-in on a runner.
+# DE, not D: icacls's D also carries SYNCHRONIZE, which every file open needs, so it denies reads too.
 function DenyWrites([string]$Folder) {
-    $null = & icacls $Folder /deny "*${userSid}:(OI)(CI)(WD,AD,WEA,WA,D,DC)"
+    $null = & icacls $Folder /deny "*${userSid}:(OI)(CI)(WD,AD,WEA,WA,DE,DC)"
     $ok = $LASTEXITCODE -eq 0
     $denied.Add($Folder)
+    $ace = @(& icacls $Folder | Where-Object { $_ -match "DENY" } | ForEach-Object { $_.Trim() }) -join " "
+    Info "Deny ACE" $ace
     return $ok
 }
 
@@ -422,6 +427,23 @@ function StopAll {
 function FileLength([string]$Path) {
     if (Test-Path -LiteralPath $Path) { return (Get-Item -LiteralPath $Path).Length }
     return 0
+}
+
+# A refused or busy file reads as "" (reported once per path), so one check fails, not the run.
+function ReadText([string]$Path) {
+    try {
+        if (-not (Test-Path -LiteralPath $Path)) { return "" }
+        return [string](Get-Content -LiteralPath $Path -Raw -ErrorAction Stop)
+    }
+    catch {
+        if ($readFailures.Add($Path)) { Info "Could not read $Path" $_.Exception.Message }
+        return ""
+    }
+}
+
+function HashOf([string]$Path) {
+    try { return (Get-FileHash -LiteralPath $Path -Algorithm SHA256 -ErrorAction Stop).Hash }
+    catch { return "unreadable: $($_.Exception.Message)" }
 }
 
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
@@ -531,7 +553,7 @@ try {
     Check "Window stays open 5 s after the relaunch" (WindowShown $tray)
     Screenshot "smoke-after-relaunch.png"
 
-    $activity = if (Test-Path -LiteralPath $activityLog) { Get-Content -LiteralPath $activityLog -Raw } else { "" }
+    $activity = ReadText $activityLog
     Check "Activity log records the first test" ($activity -match "Starting the first test\.")
     $lastLines = ($activity -split "\r?\n" | Where-Object { $_ } | Select-Object -Last 5) -join " / "
     Info "Activity log tail" $lastLines
@@ -551,7 +573,9 @@ try {
     $documentsRows = @(Get-Content -LiteralPath $logCsv | Where-Object { $_ -and $_ -notmatch "^\uFEFF?Timestamp," }).Count
 
     Check "Deny ACL set on Documents\RiotRouteLog" (DenyWrites $logFolder)
-    Check "Documents\RiotRouteLog refuses new files and still reads" ((-not (CanCreateIn $logFolder)) -and ((Get-Content -LiteralPath $logCsv -Raw) -match "SmokeSeed"))
+    $refusesCreate = -not (CanCreateIn $logFolder)
+    $stillReads = (ReadText $logCsv) -match "SmokeSeed"
+    Check "Documents\RiotRouteLog refuses new files and still reads" ($refusesCreate -and $stillReads) "refuses create: $refusesCreate, reads: $stillReads"
 
     $cfa = Launch
     $cfaShownMs = WaitUntil { WindowShown $cfa } 30000
@@ -561,10 +585,11 @@ try {
     $view = LogView $form
     SaveTexts "window-text-cfa.txt" $view
     Check "LOCAL LOG shows the AppData CSV" ($movedMs -ge 0) $view.File
-    $fallbackText = if (Test-Path -LiteralPath $fallbackCsv) { Get-Content -LiteralPath $fallbackCsv -Raw } else { "" }
+    $fallbackText = ReadText $fallbackCsv
     $fallbackRows = @($fallbackText -split "\r?\n" | Where-Object { $_ -and $_ -notmatch "^\uFEFF?Timestamp," }).Count
     Check "Earlier rows copied to AppData" (($fallbackText -match "SmokeSeed") -and ($fallbackRows -ge $documentsRows)) "$documentsRows in Documents, $fallbackRows in AppData"
-    Check "Documents CSV left as it was" ((Get-FileHash -LiteralPath $logCsv -Algorithm SHA256).Hash -eq $documentsHash)
+    $documentsHashAfter = HashOf $logCsv
+    Check "Documents CSV left as it was" ($documentsHashAfter -eq $documentsHash) $(if ($documentsHashAfter -like "unreadable:*") { $documentsHashAfter } else { "" })
     Check "Status says Controlled folder access moved the log" ($view.Status -match "Controlled folder access") $view.Status
     Check "Status carries no path or exception" ($view.Status -notmatch ":\\|Could not find file|Exception") $view.Status
     Check "No 'Could not find file' text in the window" (-not ($view.Texts -match "Could not find file"))
@@ -597,7 +622,7 @@ try {
     Screenshot "smoke-cfa-open-folder.png"
     CloseExplorerAt $fallbackFolder
 
-    $movedNoted = WaitUntil { (Test-Path -LiteralPath $fallbackActivity) -and ((Get-Content -LiteralPath $fallbackActivity -Raw) -match "Log moved to AppData") } 10000
+    $movedNoted = WaitUntil { (ReadText $fallbackActivity) -match "Log moved to AppData" } 10000
     Check "AppData activity.log records the move" ($movedNoted -ge 0)
     $cfa.Refresh()
     Check "App keeps running after the move" ((-not $cfa.HasExited) -and $cfa.Responding)
@@ -631,7 +656,7 @@ try {
     RestoreWrites
 }
 catch {
-    Check "Smoke script finished" $false $_.Exception.Message
+    Check "Smoke script finished" $false "$($_.Exception.Message) (line $($_.InvocationInfo.ScriptLineNumber))"
 }
 finally {
     StopAll
