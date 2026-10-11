@@ -73,7 +73,7 @@ jobs:
           if ($tag -notmatch '^v\d+\.\d+\.\d+') {
             throw "Refusing tag '$tag'. Expected vMAJOR.MINOR.PATCH."
           }
-          if ($tag -eq "v1.0.0" -or $tag -eq "v1.0.1") {
+          if ($tag -eq "v1.0.0" -or $tag -eq "v1.0.1" -or $tag -eq "v1.0.2") {
             throw "Refusing to overwrite release $tag."
           }
 

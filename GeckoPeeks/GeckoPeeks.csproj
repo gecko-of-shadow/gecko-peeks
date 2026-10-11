@@ -10,7 +10,8 @@
     <CopyOutputSymbolsToPublishDirectory>false</CopyOutputSymbolsToPublishDirectory>
     <AssemblyName>GeckoPeeks</AssemblyName>
     <RootNamespace>GeckoPeeks</RootNamespace>
-    <Version>1.0.2</Version>
+    <Version>1.0.3</Version>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
     <AssemblyTitle>Gecko Peeks</AssemblyTitle>
     <Product>Gecko Peeks</Product>
     <Description>System-tray monitor for the route to Riot.</Description>
