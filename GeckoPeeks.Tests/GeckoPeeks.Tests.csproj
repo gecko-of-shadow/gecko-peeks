@@ -21,9 +21,11 @@
     <Compile Include="..\GeckoPeeks\Logging\LatencyLabels.cs" Link="Logging\LatencyLabels.cs" />
     <Compile Include="..\GeckoPeeks\Net\IcmpTiming.cs" Link="Net\IcmpTiming.cs" />
     <Compile Include="..\GeckoPeeks\Text\CityNames.cs" Link="Text\CityNames.cs" />
+    <Compile Include="..\GeckoPeeks\Text\LogDisplay.cs" Link="Text\LogDisplay.cs" />
     <Compile Include="..\GeckoPeeks\Text\RouteChange.cs" Link="Text\RouteChange.cs" />
     <Compile Include="..\GeckoPeeks\Text\TooltipText.cs" Link="Text\TooltipText.cs" />
     <Compile Include="..\GeckoPeeks\Text\TrayMenu.cs" Link="Text\TrayMenu.cs" />
+    <Compile Include="..\GeckoPeeks\Text\WindowStatus.cs" Link="Text\WindowStatus.cs" />
     <Compile Include="..\GeckoPeeks\App\StartupRegistration.cs" Link="App\StartupRegistration.cs" />
   </ItemGroup>
 </Project>
