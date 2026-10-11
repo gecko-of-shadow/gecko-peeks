@@ -35,6 +35,8 @@ internal sealed class MainForm : Form
         BackColor = Theme.Jungle;
         ForeColor = Theme.Cream;
         StartPosition = FormStartPosition.CenterScreen;
+        AutoScaleMode = AutoScaleMode.Dpi;
+        AutoScaleDimensions = new SizeF(96f, 96f);
         MinimumSize = new Size(880, 640);
         Size = new Size(1120, 760);
         ShowInTaskbar = false;
