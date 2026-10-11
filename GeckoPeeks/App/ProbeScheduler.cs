@@ -79,6 +79,7 @@ public sealed class ProbeScheduler : IDisposable
     private DateTime? _tipTimestamp;
     private DateTime? _nextDueUtc;
     private DateTime? _lastTestUtc;
+    private DateTime _startedUtc;
     private List<HopObservation> _hops = new();
     private Task? _runner;
     private Task? _clock;
@@ -110,6 +111,7 @@ public sealed class ProbeScheduler : IDisposable
     public void Start()
     {
         _ui = SynchronizationContext.Current;
+        _startedUtc = DateTime.UtcNow;
         LoadFromDisk();
         if (_csv.MovedThisSession)
             Note(LogStatusText.MovedNote(_csv.CopiedRows));
@@ -211,18 +213,21 @@ public sealed class ProbeScheduler : IDisposable
             return;
         }
 
-        bool paused;
+        bool startFirst;
         lock (_gate)
         {
-            paused = _paused;
-            if (!paused)
+            // Run test now (or Resume) inside these five seconds already started or queued the
+            // first test. Asking again would run a second one straight after it.
+            var ranSinceStart = _lastTestUtc is DateTime last && last >= _startedUtc;
+            startFirst = !_paused && !_testRunning && _runRequested == 0 && !ranSinceStart;
+            if (!_paused)
             {
                 var interval = _league ? TimeSpan.FromMinutes(5) : TimeSpan.FromMinutes(15);
                 _nextDueUtc = DateTime.UtcNow.Add(interval);
             }
         }
 
-        if (!paused)
+        if (startFirst)
         {
             Note("Starting the first test.");
             RequestRun();
@@ -378,11 +383,7 @@ public sealed class ProbeScheduler : IDisposable
             {
                 _phase = update.Phase;
                 if (update.Hops != null)
-                {
-                    _hops = update.Hops.ToList();
-                    _hopsAreAddressesOnly = false;
-                    _hopsRevision++;
-                }
+                    SetHops(update.Hops);
             }
 
             Publish();
@@ -398,11 +399,7 @@ public sealed class ProbeScheduler : IDisposable
                 _phase = "Idle";
                 _lastError = "";
                 if (row.Hops.Count > 0)
-                {
-                    _hops = row.Hops.ToList();
-                    _hopsAreAddressesOnly = false;
-                    _hopsRevision++;
-                }
+                    SetHops(row.Hops);
             }
 
             Note(row.HasMeasuredData()
@@ -418,9 +415,7 @@ public sealed class ProbeScheduler : IDisposable
             {
                 _phase = "Idle";
                 _lastError = string.IsNullOrWhiteSpace(row.Error) ? "No hops responded." : row.Error;
-                _hops = row.Hops.ToList();
-                _hopsAreAddressesOnly = false;
-                _hopsRevision++;
+                SetHops(row.Hops);
             }
 
             Note("No hops responded; nothing was written to the CSV.");
@@ -442,9 +437,7 @@ public sealed class ProbeScheduler : IDisposable
             {
                 _lastError = row.Error;
                 _phase = string.IsNullOrWhiteSpace(row.Error) ? "Idle" : "Last test problem: " + row.Error;
-                _hops = row.Hops.ToList();
-                _hopsAreAddressesOnly = false;
-                _hopsRevision++;
+                SetHops(row.Hops);
             }
 
             Note(_csv.Health == LogHealth.Blocked ? LogStatusText.NotSavedNote : "Row not saved: " + ex.Message);
@@ -465,9 +458,7 @@ public sealed class ProbeScheduler : IDisposable
         {
             _lastError = row.Error;
             _phase = string.IsNullOrWhiteSpace(row.Error) ? "Idle" : "Last test problem: " + row.Error;
-            _hops = row.Hops.ToList();
-            _hopsAreAddressesOnly = false;
-            _hopsRevision++;
+            SetHops(row.Hops);
             _logRevision++;
             _logWriteStatus = saved;
             Remember(row);
@@ -494,6 +485,21 @@ public sealed class ProbeScheduler : IDisposable
             lock (_gate)
                 _phase = "Last test problem: " + row.Error;
         }
+    }
+
+    /// <summary>
+    /// Caller holds the gate. The revision moves only when the path changed, so the window
+    /// does not clear and refill the traceroute grid for each of the twenty pings.
+    /// </summary>
+    private void SetHops(IReadOnlyList<HopObservation> hops)
+    {
+        var changed = _hopsAreAddressesOnly || !HopList.SameHops(hops, _hops);
+        _hopsAreAddressesOnly = false;
+        if (!changed)
+            return;
+
+        _hops = hops.ToList();
+        _hopsRevision++;
     }
 
     private void Remember(RouteRow row)
