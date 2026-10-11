@@ -17,6 +17,8 @@
     <Compile Include="..\GeckoPeeks\Logging\CsvFormat.cs" Link="Logging\CsvFormat.cs" />
     <Compile Include="..\GeckoPeeks\Logging\CsvLog.cs" Link="Logging\CsvLog.cs" />
     <Compile Include="..\GeckoPeeks\Logging\SettingsStore.cs" Link="Logging\SettingsStore.cs" />
+    <Compile Include="..\GeckoPeeks\Logging\UpstreamSummary.cs" Link="Logging\UpstreamSummary.cs" />
+    <Compile Include="..\GeckoPeeks\Net\IcmpTiming.cs" Link="Net\IcmpTiming.cs" />
     <Compile Include="..\GeckoPeeks\Text\CityNames.cs" Link="Text\CityNames.cs" />
     <Compile Include="..\GeckoPeeks\Text\RouteChange.cs" Link="Text\RouteChange.cs" />
     <Compile Include="..\GeckoPeeks\Text\TooltipText.cs" Link="Text\TooltipText.cs" />
