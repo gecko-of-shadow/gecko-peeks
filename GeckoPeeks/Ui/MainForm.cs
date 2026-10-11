@@ -28,6 +28,7 @@ internal sealed class MainForm : Form
     private readonly Label _logPathValue;
     private readonly Label _logStatusValue;
     private readonly System.Windows.Forms.Timer _clock;
+    private readonly SplitContainer _split;
     private bool _exitRequested;
     private int _hopsRevision = -1;
     private int _logRevision = -1;
@@ -36,14 +37,19 @@ internal sealed class MainForm : Form
     {
         _scheduler = scheduler;
         var version = FormatVersion();
+
+        // Everything below is laid out in 96-DPI pixels. One DPI pass at the end of the
+        // constructor scales it all to the display. The pass runs the moment AutoScaleDimensions
+        // is set unless layout is suspended, and it only scales controls that exist by then:
+        // v1.0.10 set it first, so at 125% the text grew with the display while every fixed
+        // height stayed at 96-DPI size and cut the chip captions and buttons short.
+        SuspendLayout();
         Text = "Gecko Peeks " + version;
         Font = Theme.Body;
         BackColor = Theme.Jungle;
         ForeColor = Theme.Cream;
         StartPosition = FormStartPosition.CenterScreen;
-        AutoScaleMode = AutoScaleMode.Dpi;
-        AutoScaleDimensions = new SizeF(96f, 96f);
-        // Small enough to fit a 1080p screen at 150% scaling.
+        // Small enough to fit a 1080p screen at 150% scaling (FitToWorkingArea trims the rest).
         MinimumSize = new Size(880, 640);
         Size = new Size(1200, 860);
         Icon = GeckoMark.CreateIcon();
@@ -52,17 +58,16 @@ internal sealed class MainForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 5,
+            RowCount = 4,
             BackColor = Theme.Jungle,
             Padding = new Padding(12, 8, 12, 8),
         };
-        // Compact chrome up top so traceroute + recent log own the window.
+        // Compact chrome up top so traceroute + recent log own the window. The status panel and
+        // the LOCAL LOG strip size themselves from their fonts, so nothing in them is clipped.
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 68));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 104));
-        // The LOCAL LOG strip sizes itself from its content, so its buttons are never clipped.
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 40));
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 60));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
         root.Controls.Add(BuildHeader(version), 0, 0);
         root.Controls.Add(BuildStatus(out _modeValue, out _loggingValue, out _leagueValue, out _nextValue, out _phaseValue, out _activityValue), 0, 1);
@@ -75,11 +80,10 @@ internal sealed class MainForm : Form
         _hopsGrid.Columns.Add("Rtt", "RTT");
         _hopsGrid.Columns.Add("Network", "Network");
         StyleNumberColumn(_hopsGrid.Columns["Rtt"]);
+        FillColumn(_hopsGrid.Columns["Hostname"], 160);
         _hopsEmpty = EmptyLabel("No traceroute yet. The first test will fill this in.");
         _hopsHint = new Label
         {
-            Dock = DockStyle.Top,
-            Height = 20,
             ForeColor = Theme.CreamMuted,
             Font = Theme.Small,
             Text = "",
@@ -92,10 +96,10 @@ internal sealed class MainForm : Form
         _summaryGrid.Columns.Add("Riot", "Riot ICMP");
         StyleNumberColumn(_summaryGrid.Columns["LastHop"]);
         StyleNumberColumn(_summaryGrid.Columns["Riot"]);
+        FillColumn(_summaryGrid.Columns["Upstream"], 80);
         _summaryEmpty = EmptyLabel("No samples yet.");
         _summaryHint = new Label
         {
-            Height = 56,
             ForeColor = Theme.CreamMuted,
             BackColor = Theme.Charcoal,
             Font = Theme.Small,
@@ -110,13 +114,12 @@ internal sealed class MainForm : Form
             ColumnCount = 2,
             RowCount = 1,
             BackColor = Theme.Jungle,
-            Margin = new Padding(0, 4, 0, 0),
+            Margin = new Padding(0),
         };
         body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 62));
         body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 38));
         body.Controls.Add(Section("Latest traceroute", Wrap(_hopsGrid, _hopsEmpty, _hopsHint)), 0, 0);
         body.Controls.Add(Section("Upstream summary", Wrap(_summaryGrid, _summaryEmpty, _summaryHint)), 1, 0);
-        root.Controls.Add(body, 0, 3);
 
         _logGrid = MakeGrid();
         _logGrid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
@@ -124,9 +127,31 @@ internal sealed class MainForm : Form
             _logGrid.Columns.Add(column, LatencyLabels.ColumnHeader(column));
         ConfigureLogColumns(_logGrid);
         _logEmpty = EmptyLabel("No rows yet. A finished test appends the first line to the log.");
-        root.Controls.Add(Section("Recent log (last 50)", Wrap(_logGrid, _logEmpty, null)), 0, 4);
+
+        // Traceroute above, recent log below, with a divider the user can drag.
+        _split = new SplitContainer
+        {
+            Dock = DockStyle.Fill,
+            Orientation = Orientation.Horizontal,
+            BackColor = Theme.Jungle,
+            SplitterWidth = 6,
+            TabStop = false,
+            Margin = new Padding(0, 4, 0, 0),
+        };
+        // Keeps the log's right edge level with the Upstream summary, which has the same margin.
+        _split.Panel2.Padding = new Padding(0, 0, 8, 0);
+        _split.Panel1.Controls.Add(body);
+        _split.Panel2.Controls.Add(Section("Recent log (last 50)", Wrap(_logGrid, _logEmpty, null)));
+        root.Controls.Add(_split, 0, 3);
 
         Controls.Add(root);
+        AutoScaleDimensions = new SizeF(96f, 96f);
+        AutoScaleMode = AutoScaleMode.Dpi;
+        ResumeLayout(false);
+        PerformLayout();
+        ApplyGridMetrics();
+        PlaceSplitter();
+
         _scheduler.Updated += OnUpdated;
         _clock = new System.Windows.Forms.Timer { Interval = 1000 };
         _clock.Tick += (_, _) => ApplyClock();
@@ -217,6 +242,55 @@ internal sealed class MainForm : Form
     {
         base.OnShown(e);
         FitToWorkingArea();
+    }
+
+    protected override void OnDpiChanged(DpiChangedEventArgs e)
+    {
+        base.OnDpiChanged(e);
+        // Moving to a monitor with another scale rescales the controls, not the grids' internals.
+        ApplyGridMetrics();
+    }
+
+    /// <summary>
+    /// One line of a font in 96-DPI pixels, plus a pixel so descenders never touch the edge.
+    /// Heights built from this scale in the DPI pass together with everything else, while the
+    /// fonts scale on their own, so text and the boxes it sits in grow at the same rate.
+    /// </summary>
+    private static int LineHeight(Font font) => (int)Math.Ceiling(font.GetHeight(96f)) + 1;
+
+    /// <summary>
+    /// Row and header heights are device pixels the DPI pass does not touch, so they come from
+    /// the body font at the window's DPI (28 and 32 pixels at 100%).
+    /// </summary>
+    private void ApplyGridMetrics()
+    {
+        var rowHeight = LogicalToDeviceUnits(LineHeight(Theme.Body) + 7);
+        var headerHeight = LogicalToDeviceUnits(LineHeight(Theme.Body) + 11);
+        foreach (var grid in new[] { _hopsGrid, _summaryGrid, _logGrid })
+        {
+            grid.ColumnHeadersHeight = headerHeight;
+            grid.RowTemplate.Height = rowHeight;
+            foreach (DataGridViewRow row in grid.Rows)
+                row.Height = rowHeight;
+        }
+    }
+
+    /// <summary>
+    /// The traceroute starts with the larger share; the divider stays draggable and keeps its
+    /// ratio when the window resizes. Needs the container's real height, because the panel
+    /// minimums are checked against it.
+    /// </summary>
+    private void PlaceSplitter()
+    {
+        var minHops = LogicalToDeviceUnits(140);
+        var minLog = LogicalToDeviceUnits(120);
+        var usable = _split.Height - _split.SplitterWidth;
+        if (usable <= minHops + minLog)
+            return;
+
+        _split.Panel1MinSize = minHops;
+        _split.Panel2MinSize = minLog;
+        _split.SplitterDistance = Math.Clamp((int)(usable * 0.58), minHops, usable - minLog);
     }
 
     /// <summary>
@@ -348,6 +422,8 @@ internal sealed class MainForm : Form
                 RouteClassifier.DescribeHop(hop.Hostname));
         }
 
+        // Adding rows selects the first one; a highlighted row the user never picked reads as a bug.
+        _hopsGrid.ClearSelection();
         var empty = snapshot.Hops.Count == 0;
         _hopsEmpty.Visible = empty;
         _hopsGrid.Visible = !empty;
@@ -398,6 +474,7 @@ internal sealed class MainForm : Form
                 _logGrid.Rows[index].Cells["RiotHopAvg"].Style.ForeColor = Theme.CreamMuted;
         }
 
+        _logGrid.ClearSelection();
         var noRows = rows.Count == 0;
         _logEmpty.Visible = noRows;
         _logGrid.Visible = !noRows;
@@ -433,6 +510,7 @@ internal sealed class MainForm : Form
                 _summaryGrid.Rows[index].Cells["Riot"].Style.ForeColor = Theme.CreamMuted;
         }
 
+        _summaryGrid.ClearSelection();
         _summaryEmpty.Visible = false;
         _summaryGrid.Visible = true;
     }
@@ -511,6 +589,8 @@ internal sealed class MainForm : Form
             AutoSize = false,
             UseCompatibleTextRendering = false,
             Margin = new Padding(0),
+            // Bottom-aligned text otherwise sits on the label's last pixel row.
+            Padding = new Padding(0, 0, 0, 2),
         };
         var subtitle = new Label
         {
@@ -551,7 +631,7 @@ internal sealed class MainForm : Form
         };
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
         panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));
+        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, LineHeight(Theme.Small) + 5));
         panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
         var titleRow = new TableLayoutPanel
@@ -598,7 +678,7 @@ internal sealed class MainForm : Form
         {
             Dock = DockStyle.Fill,
             // Two lines of body text. The auto-sized row reserves exactly this height.
-            Height = 44,
+            Height = 2 * LineHeight(Theme.Body) + 2,
             ForeColor = Theme.Amber,
             Font = Theme.Body,
             TextAlign = ContentAlignment.TopLeft,
@@ -681,6 +761,8 @@ internal sealed class MainForm : Form
         var panel = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
             ColumnCount = 4,
             RowCount = 3,
             BackColor = Theme.Charcoal,
@@ -689,9 +771,10 @@ internal sealed class MainForm : Form
         };
         for (var i = 0; i < 4; i++)
             panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25));
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));
-        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        // Chips, then the phase line, then the activity line: each row is as tall as its font needs.
+        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, ChipHeight));
+        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, LineHeight(Theme.Body) + 3));
+        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, LineHeight(Theme.Body) + 5));
 
         panel.Controls.Add(Chip("Schedule", out mode), 0, 0);
         panel.Controls.Add(Chip("Logging", out logging), 1, 0);
@@ -726,6 +809,9 @@ internal sealed class MainForm : Form
         return panel;
     }
 
+    /// <summary>A small caption line over a body-font value line.</summary>
+    private static int ChipHeight => LineHeight(Theme.Small) + LineHeight(Theme.Body) + 3;
+
     private static Control Chip(string caption, out Label value)
     {
         var stack = new Panel { Dock = DockStyle.Fill, Margin = new Padding(0, 0, 8, 0), BackColor = Theme.Charcoal };
@@ -733,7 +819,7 @@ internal sealed class MainForm : Form
         {
             Text = caption.ToUpperInvariant(),
             Dock = DockStyle.Top,
-            Height = 16,
+            Height = LineHeight(Theme.Small),
             ForeColor = Theme.CreamMuted,
             Font = Theme.Small,
         };
@@ -741,7 +827,7 @@ internal sealed class MainForm : Form
         {
             Text = "\u2014",
             Dock = DockStyle.Top,
-            Height = 24,
+            Height = LineHeight(Theme.Body) + 3,
             ForeColor = Theme.Cream,
             Font = Theme.Body,
         };
@@ -757,7 +843,7 @@ internal sealed class MainForm : Form
         {
             Text = title,
             Dock = DockStyle.Top,
-            Height = 24,
+            Height = LineHeight(Theme.Section) + 1,
             ForeColor = Theme.Cream,
             Font = Theme.Section,
         };
@@ -776,11 +862,34 @@ internal sealed class MainForm : Form
         host.Controls.Add(empty);
         if (hint != null)
         {
+            // Docked at the bottom, as tall as its text wraps to at the panel's width. Not
+            // AutoSize: an auto-sized label takes its own unwrapped preferred size and ignores
+            // the dock width, which left this a one-line sliver at 125%.
             hint.Dock = DockStyle.Bottom;
+            hint.AutoSize = false;
+            host.Layout += (_, _) => FitHint(host, hint);
+            hint.TextChanged += (_, _) => host.PerformLayout();
             host.Controls.Add(hint);
         }
 
         return host;
+    }
+
+    /// <summary>
+    /// Runs before the host docks its children, so the dock pass uses the measured height. An
+    /// empty hint takes no room. The measurement is in the window's device pixels, like the
+    /// text it is for.
+    /// </summary>
+    private static void FitHint(Panel host, Label hint)
+    {
+        if (string.IsNullOrEmpty(hint.Text))
+        {
+            hint.Height = 0;
+            return;
+        }
+
+        var width = Math.Max(1, host.ClientSize.Width - host.Padding.Horizontal);
+        hint.Height = hint.GetPreferredSize(new Size(width, 0)).Height;
     }
 
     private static Label EmptyLabel(string text) => new()
@@ -812,11 +921,10 @@ internal sealed class MainForm : Form
             AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.DisplayedCells,
             CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal,
             ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.None,
-            ColumnHeadersHeight = 32,
+            // Row and header heights: ApplyGridMetrics, from the font at the window's DPI.
             ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing,
             ScrollBars = ScrollBars.Both,
         };
-        grid.RowTemplate.Height = 28;
         grid.ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle
         {
             BackColor = Theme.Panel,
@@ -835,18 +943,13 @@ internal sealed class MainForm : Form
             Font = Theme.Body,
             Padding = new Padding(6, 0, 6, 0),
         };
-        grid.AlternatingRowsDefaultCellStyle = new DataGridViewCellStyle
-        {
-            BackColor = Theme.Panel,
-            ForeColor = Theme.Cream,
-            SelectionBackColor = Theme.Jungle,
-            SelectionForeColor = Theme.Cream,
-            Font = Theme.Body,
-        };
+        // Only the background alternates. A font here would outrank the number columns' bold
+        // font (row styles win over column styles), making every other row's numbers regular.
+        grid.AlternatingRowsDefaultCellStyle = new DataGridViewCellStyle { BackColor = Theme.Panel };
         return grid;
     }
 
-    private static void StyleNumberColumn(DataGridViewColumn? column)
+    private void StyleNumberColumn(DataGridViewColumn? column)
     {
         if (column == null)
             return;
@@ -856,7 +959,19 @@ internal sealed class MainForm : Form
             ForeColor = Theme.Cream,
             Alignment = DataGridViewContentAlignment.MiddleRight,
         };
-        column.MinimumWidth = 64;
+        column.MinimumWidth = LogicalToDeviceUnits(64);
+    }
+
+    /// <summary>
+    /// The column that takes the width the others leave over, so the grid runs up to its
+    /// scrollbar instead of ending in an empty band.
+    /// </summary>
+    private void FillColumn(DataGridViewColumn? column, int minimumWidth)
+    {
+        if (column == null)
+            return;
+        column.AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
+        column.MinimumWidth = LogicalToDeviceUnits(minimumWidth);
     }
 
     /// <summary>
@@ -864,7 +979,7 @@ internal sealed class MainForm : Form
     /// and keeps horizontal scroll for the long FullPath tail. Riot ICMP sits after the
     /// path numbers because Riot usually filters ping.
     /// </summary>
-    private static void ConfigureLogColumns(DataGridView grid)
+    private void ConfigureLogColumns(DataGridView grid)
     {
         var front = new[]
         {
@@ -903,13 +1018,13 @@ internal sealed class MainForm : Form
         if (grid.Columns.Contains("Timestamp"))
         {
             grid.Columns["Timestamp"].Frozen = true;
-            grid.Columns["Timestamp"].MinimumWidth = 140;
+            grid.Columns["Timestamp"].MinimumWidth = LogicalToDeviceUnits(140);
         }
 
         if (grid.Columns.Contains("Upstream"))
         {
             grid.Columns["Upstream"].Frozen = true;
-            grid.Columns["Upstream"].MinimumWidth = 72;
+            grid.Columns["Upstream"].MinimumWidth = LogicalToDeviceUnits(72);
         }
 
         foreach (var name in new[] { "HandoffRttMs", "LastHopAvg", "RiotHopAvg" })
@@ -920,8 +1035,8 @@ internal sealed class MainForm : Form
 
         if (grid.Columns.Contains("FullPath"))
         {
-            grid.Columns["FullPath"].MinimumWidth = 220;
-            grid.Columns["FullPath"].Width = 320;
+            grid.Columns["FullPath"].MinimumWidth = LogicalToDeviceUnits(220);
+            grid.Columns["FullPath"].Width = LogicalToDeviceUnits(320);
         }
 
         grid.ScrollBars = ScrollBars.Both;

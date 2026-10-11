@@ -10,6 +10,10 @@ Windows 11 tray app that traceroutes to Riot (`192.207.0.5`) and appends each re
 
 The tray menu: **Open window**, Run test now, Open log, Open log folder, Pause/Resume logging, Start with Windows (cream checkmark when on), Exit.
 
+## Window
+
+The window scales with the display: at 125% or 150% every box grows with its text, so chip captions, buttons and hints are drawn whole. The traceroute's **Hostname** column and the summary's **Upstream** column take the width the other columns leave over, so the grids run up to their scrollbars. A divider between the traceroute and the recent log can be dragged to give either more room; it keeps its ratio when the window resizes. Replacing an older build: exit the old tray app first (right-click the gecko > **Exit**), then run the new exe, and check the title bar shows the new version.
+
 ## Build
 
 From this folder, in PowerShell:
@@ -87,7 +91,7 @@ The tray tooltip looks like `Zayo → Telia sea1 | last hop 21 ms | 2 min ago` a
 
 GitHub Actions publishes `GeckoPeeks.exe` only on `v*` tag pushes or `workflow_dispatch` (with a tag input). Ordinary pushes to `main` do not overwrite a release.
 
-Before uploading, the release job runs `dotnet test` and `.github/scripts/smoke-exe.ps1` on windows-latest. The CI workflow runs the same smoke on every push to `main`, so a regression shows up on the push that caused it. The smoke launches the published exe and checks that the window opens with the expected version, stays open through the first test, hides to the tray on Close, reopens from a tray click, a tray double-click, and a second launch, starts hidden with `--tray`, repoints a stale Start with Windows value, draws the **LOCAL LOG** caption and buttons whole, and leaves no `crash.log`.
+Before uploading, the release job runs `dotnet test` and `.github/scripts/smoke-exe.ps1` on windows-latest. The CI workflow runs the same smoke on every push to `main`, so a regression shows up on the push that caused it. The smoke launches the published exe and checks that the window opens with the expected version, stays open through the first test, hides to the tray on Close, reopens from a tray click, a tray double-click, and a second launch, starts hidden with `--tray`, repoints a stale Start with Windows value, draws every label and button whole (inside its panel, no text cut at the bottom edge, no overlaps; checked on a render of the window), and leaves no `crash.log`.
 
 It then denies writes to `Documents\RiotRouteLog` with an ACL, the way Controlled folder access refuses them, and checks that the log moves to `%LOCALAPPDATA%\GeckoPeeks\RiotRouteLog` with its rows, that the Documents CSV is unchanged, that **LOCAL LOG** shows the new path with no "Could not find file" text, and that **Open folder** opens it. With AppData denied too, the **Logging** chip must read **Blocked** (in coral) and the status must be one short line. Window text, load time, memory, and screenshots land in the job summary, run annotations, and the `smoke-v*` artifact (`smoke-ci-<sha>` on CI).
 
