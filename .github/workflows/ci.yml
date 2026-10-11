@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - ".github/workflows/ship-v102.yml"
+      - ".github/workflows/cut-v102.yml"
+      - ".github/workflows/retag-v102.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Materialize application icon
+        shell: pwsh
+        run: |
+          $b64 = "GeckoPeeks/Assets/gecko-peeks.ico.b64"
+          $ico = "GeckoPeeks/Assets/gecko-peeks.ico"
+          if (-not (Test-Path -LiteralPath $ico)) { certutil -decode $b64 $ico }
+      - name: Test
+        run: dotnet test -c Release
