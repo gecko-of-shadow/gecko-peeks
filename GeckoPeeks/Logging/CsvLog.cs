@@ -1,4 +1,5 @@
 using System.Text;
+using GeckoPeeks.Text;
 
 namespace GeckoPeeks.Logging;
 
@@ -8,30 +9,90 @@ public enum AppendResult
     Pending,
 }
 
+/// <summary>What the last write left behind. Only <see cref="Blocked"/> is a problem.</summary>
+public enum LogHealth
+{
+    /// <summary>Nothing written since launch.</summary>
+    Waiting,
+
+    /// <summary>The last row reached the main CSV.</summary>
+    Saved,
+
+    /// <summary>The main CSV was locked (Excel), so the last row went to the pending file.</summary>
+    Pending,
+
+    /// <summary>Windows refused every folder Gecko Peeks may write to.</summary>
+    Blocked,
+}
+
 /// <summary>
 /// Append-only route log. The main CSV is never truncated or rotated.
 /// A locked main file (Excel) sends the finished row to the pending file,
 /// and the next successful open merges those rows back in.
+/// When Windows refuses writes in the primary folder (Controlled folder access protects
+/// Documents), the log moves once to the fallback folder with the earlier rows and stays
+/// there. Files in the primary folder are only read, never changed.
 /// </summary>
 public sealed class CsvLog
 {
-    private readonly object _gate = new();
-    private readonly Func<bool>? _mainUnavailable;
-    private readonly UTF8Encoding _utf8 = new(encoderShouldEmitUTF8Identifier: false);
-    private DateTime _lastBackupUtc = DateTime.MinValue;
-    private bool _forceBackup;
+    public const string MainFileName = "riot-route-log.csv";
+    public const string PendingFileName = "riot-route-log.pending.csv";
+    public const string BackupFileName = "riot-route-log.backup.csv";
+
+    /// <summary>About ten days of 15-minute tests.</summary>
+    public const int MaxUnsavedRows = 1000;
+
+    private const string ProbeFileName = ".gecko-peeks-write-test.tmp";
     private static readonly TimeSpan BackupMinInterval = TimeSpan.FromMinutes(30);
 
-    public CsvLog(string folder, Func<bool>? mainUnavailable = null)
+    private readonly object _gate = new();
+    private readonly Func<bool>? _mainUnavailable;
+    private readonly Func<string, Exception?>? _writeFault;
+    private readonly UTF8Encoding _utf8 = new(encoderShouldEmitUTF8Identifier: false);
+    private readonly List<string> _unsaved = new();
+    private DateTime _lastBackupUtc = DateTime.MinValue;
+    private bool _forceBackup;
+    private volatile int _unsavedCount;
+
+    /// <param name="folder">Primary folder (Documents\RiotRouteLog).</param>
+    /// <param name="mainUnavailable">Test seam: report the main CSV as locked.</param>
+    /// <param name="fallbackFolder">Where the log moves when Windows refuses <paramref name="folder"/>.</param>
+    /// <param name="writeFault">
+    /// Test seam: an exception to throw instead of writing a path, the way Controlled folder access refuses it.
+    /// </param>
+    public CsvLog(
+        string folder,
+        Func<bool>? mainUnavailable = null,
+        string? fallbackFolder = null,
+        Func<string, Exception?>? writeFault = null)
     {
-        Folder = folder;
+        PrimaryFolder = folder;
+        FallbackFolder = string.IsNullOrWhiteSpace(fallbackFolder) || SamePath(folder, fallbackFolder)
+            ? null
+            : fallbackFolder;
         _mainUnavailable = mainUnavailable;
+        _writeFault = writeFault;
+
+        // A main CSV in the fallback means an earlier run already moved there. Staying keeps
+        // every row in one file even if Documents becomes writable again.
+        Folder = FallbackFolder != null && File.Exists(Path.Combine(FallbackFolder, MainFileName))
+            ? FallbackFolder
+            : folder;
     }
 
-    public string Folder { get; }
-    public string MainPath => Path.Combine(Folder, "riot-route-log.csv");
-    public string PendingPath => Path.Combine(Folder, "riot-route-log.pending.csv");
-    public string BackupPath => Path.Combine(Folder, "riot-route-log.backup.csv");
+    public string PrimaryFolder { get; }
+
+    public string? FallbackFolder { get; }
+
+    /// <summary>The folder in use: the primary folder, or the fallback once the log has moved.</summary>
+    public string Folder { get; private set; }
+
+    public bool UsingFallback =>
+        FallbackFolder != null && string.Equals(Folder, FallbackFolder, StringComparison.OrdinalIgnoreCase);
+
+    public string MainPath => Path.Combine(Folder, MainFileName);
+    public string PendingPath => Path.Combine(Folder, PendingFileName);
+    public string BackupPath => Path.Combine(Folder, BackupFileName);
     public string MergingPath => PendingPath + ".merging";
 
     public string? ReadProblem { get; private set; }
@@ -45,175 +106,312 @@ public sealed class CsvLog
 
     public AppendResult? LastAppendResult { get; private set; }
 
+    public LogHealth Health { get; private set; } = LogHealth.Waiting;
+
+    /// <summary>
+    /// Short reason shown while the log is blocked; null otherwise. Never raw exception text:
+    /// Controlled folder access reports a refused create as "Could not find file", which reads
+    /// like a missing file rather than a block.
+    /// </summary>
     public string? LastWriteError { get; private set; }
+
+    /// <summary>Finished rows still waiting for a folder that accepts them.</summary>
+    public int UnsavedRows => _unsavedCount;
+
+    /// <summary>True when this run moved the log from the primary folder to the fallback.</summary>
+    public bool MovedThisSession { get; private set; }
+
+    /// <summary>Earlier rows copied into the fallback by that move.</summary>
+    public int CopiedRows { get; private set; }
+
+    /// <summary>
+    /// Startup check with a throwaway file, so a refused folder is found before the first test
+    /// and the window shows the folder that will really hold the log.
+    /// </summary>
+    public void PrepareFolder()
+    {
+        lock (_gate)
+        {
+            if (CanCreateFileIn(Folder))
+                return;
+
+            if (!UsingFallback && FallbackFolder != null)
+            {
+                try
+                {
+                    var copied = CopyHistoryInto(FallbackFolder);
+                    if (CanCreateFileIn(FallbackFolder))
+                    {
+                        MoveTo(FallbackFolder, copied);
+                        return;
+                    }
+                }
+                catch (Exception ex) when (IsWriteFailure(ex))
+                {
+                    // The fallback refused too.
+                }
+            }
+
+            MarkBlocked();
+        }
+    }
 
     public AppendResult Append(RouteRow row)
     {
         var line = CsvFormat.FormatLine(row);
         lock (_gate)
         {
-            try
-            {
-                EnsureFolder();
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                LastWriteError = ex.Message;
-                throw AccessDenied(ex, mainError: null);
-            }
+            // Rows from blocked attempts go first so the file stays in time order.
+            var payload = string.Concat(_unsaved) + line;
+            if (TryAppendIn(Folder, payload, out var result, out var failure))
+                return Saved(result);
 
-            var unavailable = _mainUnavailable?.Invoke() ?? false;
-            Exception? mainError = null;
-            if (!unavailable)
+            if (!UsingFallback && FallbackFolder != null)
             {
                 try
                 {
-                    WriteMain(line);
-                    RememberWrite(AppendResult.Main, MainPath);
-                    return AppendResult.Main;
+                    var copied = CopyHistoryInto(FallbackFolder);
+                    if (TryAppendIn(FallbackFolder, payload, out result, out failure))
+                    {
+                        MoveTo(FallbackFolder, copied);
+                        return Saved(result);
+                    }
                 }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                catch (Exception ex) when (IsWriteFailure(ex))
                 {
-                    unavailable = true;
-                    mainError = ex;
+                    failure = ex;
                 }
             }
 
-            if (!unavailable)
-            {
-                RememberWrite(AppendResult.Main, MainPath);
-                return AppendResult.Main;
-            }
-
-            try
-            {
-                WritePending(line);
-                RememberWrite(AppendResult.Pending, PendingPath);
-                return AppendResult.Pending;
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                LastWriteError = ex.Message;
-                throw AccessDenied(ex, mainError);
-            }
+            _unsaved.Add(line);
+            if (_unsaved.Count > MaxUnsavedRows)
+                _unsaved.RemoveAt(0);
+            _unsavedCount = _unsaved.Count;
+            MarkBlocked();
+            throw new IOException(LastWriteError, failure);
         }
     }
-
-    private void RememberWrite(AppendResult result, string path)
-    {
-        LastAppendResult = result;
-        LastSuccessfulWriteLocal = DateTime.Now;
-        LastSuccessfulWritePath = path;
-        LastWriteError = null;
-    }
-
-    private static IOException AccessDenied(Exception ex, Exception? mainError) =>
-        new(
-            "Could not write the route log under Documents\\RiotRouteLog (main or pending). "
-            + "If Controlled folder access is on, allow GeckoPeeks.exe under ransomware protection. "
-            + (mainError?.Message ?? ex.Message),
-            ex);
 
     public IReadOnlyList<RouteRow> ReadAll()
     {
         // Shared reads do not need the writer lock. Avoid blocking the UI behind
         // an in-flight append that is flushing and refreshing the backup.
+        var folder = Folder;
         var rows = new List<RouteRow>();
         string? problem = null;
         try
         {
-            rows.AddRange(CsvFormat.Parse(ReadShared(MainPath)));
+            rows.AddRange(CsvFormat.Parse(ReadShared(Path.Combine(folder, MainFileName))));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             try
             {
-                rows.AddRange(CsvFormat.Parse(ReadShared(BackupPath)));
+                rows.AddRange(CsvFormat.Parse(ReadShared(Path.Combine(folder, BackupFileName))));
                 problem = "Main log is locked. Showing the backup copy.";
             }
-            catch (Exception inner) when (inner is IOException or UnauthorizedAccessException or FileNotFoundException)
+            catch (Exception inner) when (inner is IOException or UnauthorizedAccessException)
             {
                 problem = "The log is locked and the backup could not be read.";
             }
         }
 
-        rows.AddRange(ReadPendingRows());
+        rows.AddRange(ReadPendingRows(folder));
         ReadProblem = problem;
         return rows;
     }
 
-    private void WriteMain(string line)
+    private AppendResult Saved(AppendResult result)
     {
-        EnsureFolder();
-        using var stream = OpenExclusive(MainPath);
-        MergePending(stream);
-        if (stream.Length == 0)
-            WriteFull(stream, Encoding.UTF8.GetPreamble().Concat(_utf8.GetBytes(CsvFormat.HeaderLine)).ToArray());
-        WriteFull(stream, _utf8.GetBytes(line));
-        RefreshBackup(stream);
+        _unsaved.Clear();
+        _unsavedCount = 0;
+        LastAppendResult = result;
+        LastSuccessfulWriteLocal = DateTime.Now;
+        LastSuccessfulWritePath = result == AppendResult.Main ? MainPath : PendingPath;
+        LastWriteError = null;
+        Health = result == AppendResult.Main ? LogHealth.Saved : LogHealth.Pending;
+        return result;
     }
 
-    private void WritePending(string line)
+    private void MarkBlocked()
     {
-        EnsureFolder();
-        var bytes = _utf8.GetBytes(line);
+        Health = LogHealth.Blocked;
+        LastWriteError = LogStatusText.BlockedReason;
+    }
+
+    private void MoveTo(string folder, int copiedRows)
+    {
+        Folder = folder;
+        MovedThisSession = true;
+        CopiedRows = copiedRows;
+        _forceBackup = true;
+    }
+
+    /// <summary>Main CSV first; a locked or refused main sends the rows to the pending file.</summary>
+    private bool TryAppendIn(string folder, string payload, out AppendResult result, out Exception? failure)
+    {
+        result = AppendResult.Main;
+        failure = null;
         try
         {
-            using var stream = OpenExclusive(PendingPath);
-            WriteFull(stream, bytes);
+            CreateFolder(folder);
+        }
+        catch (Exception ex) when (IsWriteFailure(ex))
+        {
+            failure = ex;
+            return false;
+        }
+
+        if (!(_mainUnavailable?.Invoke() ?? false))
+        {
+            try
+            {
+                WriteMain(folder, payload);
+                result = AppendResult.Main;
+                return true;
+            }
+            catch (Exception ex) when (IsWriteFailure(ex))
+            {
+                failure = ex;
+            }
+        }
+
+        try
+        {
+            WritePending(folder, payload);
+            result = AppendResult.Pending;
+            return true;
+        }
+        catch (Exception ex) when (IsWriteFailure(ex))
+        {
+            failure = ex;
+            return false;
+        }
+    }
+
+    private void WriteMain(string folder, string payload)
+    {
+        using var stream = OpenForWrite(Path.Combine(folder, MainFileName), FileMode.OpenOrCreate, FileAccess.ReadWrite);
+        MergePending(folder, stream);
+        if (stream.Length == 0)
+            WriteFull(stream, Header());
+        WriteFull(stream, _utf8.GetBytes(payload));
+        RefreshBackup(folder, stream);
+    }
+
+    private void WritePending(string folder, string payload)
+    {
+        using var stream = OpenForWrite(Path.Combine(folder, PendingFileName), FileMode.OpenOrCreate, FileAccess.ReadWrite);
+        WriteFull(stream, _utf8.GetBytes(payload));
+    }
+
+    /// <summary>
+    /// Starts the fallback log with every row the primary folder holds. Controlled folder access
+    /// still allows reads, so the Documents rows come along. Returns the number of rows copied
+    /// (0 when the fallback already has a log).
+    /// </summary>
+    private int CopyHistoryInto(string folder)
+    {
+        CreateFolder(folder);
+        var main = Path.Combine(folder, MainFileName);
+        if (File.Exists(main) && new FileInfo(main).Length > 0)
+            return 0;
+
+        var lines = new List<string>();
+        lines.AddRange(DataLines(ReadPrimary(MainFileName, orBackup: true)));
+        lines.AddRange(DataLines(ReadPrimary(PendingFileName + ".merging", orBackup: false)));
+        lines.AddRange(DataLines(ReadPrimary(PendingFileName, orBackup: false)));
+
+        var temp = main + ".copy";
+        WriteBytesDurable(temp, Header().Concat(_utf8.GetBytes(string.Concat(lines))).ToArray());
+        File.Move(temp, main, overwrite: true);
+        return lines.Count;
+    }
+
+    private string ReadPrimary(string fileName, bool orBackup)
+    {
+        try
+        {
+            return ReadShared(Path.Combine(PrimaryFolder, fileName));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            if (!orBackup)
+                return "";
+            try
+            {
+                return ReadShared(Path.Combine(PrimaryFolder, BackupFileName));
+            }
+            catch (Exception inner) when (inner is IOException or UnauthorizedAccessException)
+            {
+                return "";
+            }
+        }
+    }
+
+    private bool CanCreateFileIn(string folder)
+    {
+        try
+        {
+            CreateFolder(folder);
+            using (OpenForWrite(Path.Combine(folder, ProbeFileName), FileMode.Create, FileAccess.Write, FileOptions.DeleteOnClose))
+            {
+            }
+
+            return true;
+        }
+        catch (Exception ex) when (IsWriteFailure(ex))
+        {
+            return false;
+        }
+    }
+
+    private void MergePending(string folder, FileStream main)
+    {
+        var pending = Path.Combine(folder, PendingFileName);
+        var merging = pending + ".merging";
+
+        // Move pending aside first so a crash cannot append the same lines twice
+        // while also leaving them out of the main file.
+        try
+        {
+            if (File.Exists(pending) && File.Exists(merging))
+            {
+                var combined = ReadShared(merging) + ReadShared(pending);
+                var temp = merging + ".next";
+                WriteBytesDurable(temp, _utf8.GetBytes(combined));
+                File.Move(temp, merging, overwrite: true);
+                try
+                {
+                    File.Delete(pending);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    // Merging copy has the payload; pending can be cleaned up later.
+                }
+            }
+            else if (File.Exists(pending))
+            {
+                File.Move(pending, merging);
+            }
         }
         catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
         {
-            // Controlled folder access and a missing parent can surface as FileNotFound.
-            // Recreate the folder and the pending file explicitly, then append.
-            EnsureFolder();
-            using var stream = new FileStream(PendingPath, FileMode.Create, FileAccess.Write, FileShare.None);
-            stream.Write(bytes, 0, bytes.Length);
-            stream.Flush(true);
-        }
-    }
-
-    private void EnsureFolder()
-    {
-        Directory.CreateDirectory(Folder);
-    }
-
-    private void MergePending(FileStream main)
-    {
-        // Move pending aside first so a crash cannot append the same lines twice
-        // while also leaving them out of the main file.
-        if (File.Exists(PendingPath) && File.Exists(MergingPath))
-        {
-            var combined = ReadShared(MergingPath) + ReadShared(PendingPath);
-            var temp = MergingPath + ".next";
-            WriteBytesDurable(temp, _utf8.GetBytes(combined));
-            File.Move(temp, MergingPath, overwrite: true);
-            try
-            {
-                File.Delete(PendingPath);
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                // Merging copy has the payload; pending can be cleaned up later.
-            }
-        }
-        else if (File.Exists(PendingPath))
-        {
-            File.Move(PendingPath, MergingPath);
+            // No pending file, or it went away after the check. Nothing to merge.
         }
 
-        if (!File.Exists(MergingPath))
+        if (!File.Exists(merging))
             return;
 
-        var lines = DataLines(ReadShared(MergingPath));
+        var lines = DataLines(ReadShared(merging));
         if (lines.Count == 0)
         {
-            File.Delete(MergingPath);
+            File.Delete(merging);
             return;
         }
 
         if (main.Length == 0)
-            WriteFull(main, Encoding.UTF8.GetPreamble().Concat(_utf8.GetBytes(CsvFormat.HeaderLine)).ToArray());
+            WriteFull(main, Header());
 
         // One write for every pending row. If it fails, WriteFull rolls the file back
         // and the merging file is still intact. If it succeeds and we crash before
@@ -228,7 +426,7 @@ public sealed class CsvLog
                 WriteFull(main, _utf8.GetBytes(payload));
         }
 
-        File.Delete(MergingPath);
+        File.Delete(merging);
         _forceBackup = true;
     }
 
@@ -259,16 +457,15 @@ public sealed class CsvLog
         return lines;
     }
 
-    private List<RouteRow> ReadPendingRows()
+    private static List<RouteRow> ReadPendingRows(string folder)
     {
         var rows = new List<RouteRow>();
-        foreach (var path in new[] { PendingPath, MergingPath })
+        var pending = Path.Combine(folder, PendingFileName);
+        foreach (var path in new[] { pending, pending + ".merging" })
         {
-            if (!File.Exists(path))
-                continue;
             try
             {
-                rows.AddRange(CsvFormat.Parse(File.ReadAllText(path)));
+                rows.AddRange(CsvFormat.Parse(ReadShared(path)));
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
@@ -279,23 +476,24 @@ public sealed class CsvLog
         return rows;
     }
 
-    private void RefreshBackup(FileStream main)
+    private void RefreshBackup(string folder, FileStream main)
     {
         // The row is already flushed. A backup failure must not send the same row to pending.
         // Full-file copy is throttled so OneDrive / AV do not rewrite the whole log every append.
+        var backup = Path.Combine(folder, BackupFileName);
         try
         {
             main.Flush(true);
             var now = DateTime.UtcNow;
-            var missing = !File.Exists(BackupPath);
+            var missing = !File.Exists(backup);
             if (!missing && !_forceBackup && now - _lastBackupUtc < BackupMinInterval)
             {
                 main.Seek(0, SeekOrigin.End);
                 return;
             }
 
-            var temp = BackupPath + ".tmp";
-            using (var dest = new FileStream(temp, FileMode.Create, FileAccess.Write, FileShare.None))
+            var temp = backup + ".tmp";
+            using (var dest = OpenForWrite(temp, FileMode.Create, FileAccess.Write))
             {
                 main.Position = 0;
                 main.CopyTo(dest);
@@ -303,7 +501,7 @@ public sealed class CsvLog
             }
 
             main.Seek(0, SeekOrigin.End);
-            File.Move(temp, BackupPath, overwrite: true);
+            File.Move(temp, backup, overwrite: true);
             _lastBackupUtc = now;
             _forceBackup = false;
             BackupProblem = null;
@@ -323,13 +521,46 @@ public sealed class CsvLog
         }
     }
 
-    private static FileStream OpenExclusive(string path)
+    private byte[] Header() =>
+        Encoding.UTF8.GetPreamble().Concat(_utf8.GetBytes(CsvFormat.HeaderLine)).ToArray();
+
+    private void CreateFolder(string folder)
     {
+        ThrowIfRefused(folder);
+        Directory.CreateDirectory(folder);
+    }
+
+    private FileStream OpenForWrite(string path, FileMode mode, FileAccess access, FileOptions options = FileOptions.None)
+    {
+        ThrowIfRefused(path);
         var directory = Path.GetDirectoryName(path);
         if (!string.IsNullOrEmpty(directory))
             Directory.CreateDirectory(directory);
 
-        return new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        return new FileStream(path, mode, access, FileShare.None, 4096, options);
+    }
+
+    private void ThrowIfRefused(string path)
+    {
+        var refusal = _writeFault?.Invoke(path);
+        if (refusal != null)
+            throw refusal;
+    }
+
+    private static bool IsWriteFailure(Exception ex) => ex is IOException or UnauthorizedAccessException;
+
+    private static bool SamePath(string a, string b)
+    {
+        try
+        {
+            var left = Path.TrimEndingDirectorySeparator(Path.GetFullPath(a));
+            var right = Path.TrimEndingDirectorySeparator(Path.GetFullPath(b));
+            return string.Equals(left, right, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+        }
     }
 
     /// <summary>
@@ -361,20 +592,25 @@ public sealed class CsvLog
         }
     }
 
-    private static void WriteBytesDurable(string path, byte[] bytes)
+    private void WriteBytesDurable(string path, byte[] bytes)
     {
-        using var stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None);
+        using var stream = OpenForWrite(path, FileMode.Create, FileAccess.Write);
         stream.Write(bytes, 0, bytes.Length);
         stream.Flush(true);
     }
 
+    /// <summary>A missing file reads as empty: no pending file is the normal case, not an error.</summary>
     private static string ReadShared(string path)
     {
-        if (!File.Exists(path))
+        try
+        {
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+            return reader.ReadToEnd();
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
             return "";
-
-        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-        using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
-        return reader.ReadToEnd();
+        }
     }
 }

@@ -125,7 +125,8 @@ public class CsvDurabilityTests
             var ex = Assert.ThrowsAny<IOException>(() => log.Append(Row("Zayo", "12:00:00")));
             Assert.Contains("Controlled folder access", ex.Message, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("GeckoPeeks.exe", ex.Message, StringComparison.Ordinal);
-            Assert.Contains("RiotRouteLog", ex.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain(folder, ex.Message, StringComparison.Ordinal);
+            Assert.Equal(LogHealth.Blocked, log.Health);
         }
         finally
         {
