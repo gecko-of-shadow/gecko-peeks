@@ -22,9 +22,9 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
         _icon = new NotifyIcon
         {
-            Icon = GeckoMark.CreateIcon(),
+            Icon = GeckoMark.CreateIcon(SystemInformation.SmallIconSize),
             Visible = true,
-            Text = "Gecko Peeks \u2014 no route yet",
+            Text = "Gecko Peeks — no route yet",
         };
         _icon.DoubleClick += (_, _) => _form.ShowFromTray();
 
