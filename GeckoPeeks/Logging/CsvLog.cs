@@ -37,6 +37,16 @@ public sealed class CsvLog
     public string? ReadProblem { get; private set; }
     public string? BackupProblem { get; private set; }
 
+    /// <summary>Local time of the last successful main or pending append.</summary>
+    public DateTime? LastSuccessfulWriteLocal { get; private set; }
+
+    /// <summary>Full path written on the last successful append (main or pending).</summary>
+    public string? LastSuccessfulWritePath { get; private set; }
+
+    public AppendResult? LastAppendResult { get; private set; }
+
+    public string? LastWriteError { get; private set; }
+
     public AppendResult Append(RouteRow row)
     {
         var line = CsvFormat.FormatLine(row);
@@ -48,6 +58,7 @@ public sealed class CsvLog
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
+                LastWriteError = ex.Message;
                 throw AccessDenied(ex, mainError: null);
             }
 
@@ -58,6 +69,7 @@ public sealed class CsvLog
                 try
                 {
                     WriteMain(line);
+                    RememberWrite(AppendResult.Main, MainPath);
                     return AppendResult.Main;
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -68,18 +80,31 @@ public sealed class CsvLog
             }
 
             if (!unavailable)
+            {
+                RememberWrite(AppendResult.Main, MainPath);
                 return AppendResult.Main;
+            }
 
             try
             {
                 WritePending(line);
+                RememberWrite(AppendResult.Pending, PendingPath);
                 return AppendResult.Pending;
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
+                LastWriteError = ex.Message;
                 throw AccessDenied(ex, mainError);
             }
         }
+    }
+
+    private void RememberWrite(AppendResult result, string path)
+    {
+        LastAppendResult = result;
+        LastSuccessfulWriteLocal = DateTime.Now;
+        LastSuccessfulWritePath = path;
+        LastWriteError = null;
     }
 
     private static IOException AccessDenied(Exception ex, Exception? mainError) =>
