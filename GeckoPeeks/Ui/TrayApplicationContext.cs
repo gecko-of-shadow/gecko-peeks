@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using GeckoPeeks.App;
+using Microsoft.Win32;
 
 namespace GeckoPeeks.Ui;
 
@@ -46,6 +47,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         instance.Listen(() => _form.BeginInvoke(new Action(_form.ShowFromTray)));
         _scheduler.Start();
         _startupItem.Checked = StartupRegistration.IsEnabled();
+        SystemEvents.SessionEnding += OnSessionEnding;
 
         _clock = new System.Windows.Forms.Timer { Interval = 15000 };
         _clock.Tick += (_, _) => _icon.Text = Fit(_scheduler.Capture().Tooltip);
@@ -123,12 +125,41 @@ internal sealed class TrayApplicationContext : ApplicationContext
         }
     }
 
+    private void OnSessionEnding(object? sender, SessionEndingEventArgs e)
+    {
+        if (_exiting)
+            return;
+        _exiting = true;
+        _clock.Stop();
+        try
+        {
+            // Logoff/shutdown will kill the process; finish the runner synchronously.
+            _scheduler.StopAsync().GetAwaiter().GetResult();
+        }
+        catch
+        {
+            // Best-effort shutdown.
+        }
+
+        try
+        {
+            _icon.Visible = false;
+            _icon.Dispose();
+            _scheduler.Dispose();
+        }
+        catch
+        {
+            // Process is ending.
+        }
+    }
+
     private async void Exit()
     {
         if (_exiting)
             return;
         _exiting = true;
 
+        SystemEvents.SessionEnding -= OnSessionEnding;
         _clock.Stop();
         try
         {

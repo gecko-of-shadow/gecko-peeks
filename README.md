@@ -16,7 +16,7 @@ Set-Location GeckoPeeks
 dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
 ```
 
-The executable is `GeckoPeeks\bin\Release\net8.0-windows\win-x64\publish\GeckoPeeks.exe`. It is a single-file self-contained win-x64 app and does not need administrator rights. The publish step embeds `Assets\gecko-peeks.ico` (multi-size 16/32/48) so Explorer, shortcuts, and the taskbar show the gecko. The binary `.ico` is generated from the committed `gecko-peeks.ico.b64` when missing.
+The executable is `GeckoPeeks\bin\Release\net8.0-windows\win-x64\publish\GeckoPeeks.exe`. It is a compressed single-file self-contained win-x64 app and does not need administrator rights. The publish step embeds `Assets\gecko-peeks.ico` (multi-size 16/32/48) so Explorer, shortcuts, and the taskbar show the gecko. The binary `.ico` is generated from the committed `gecko-peeks.ico.b64` when missing. GitHub Releases publish on `v*` tags (or `workflow_dispatch`) only.
 
 Run it:
 
