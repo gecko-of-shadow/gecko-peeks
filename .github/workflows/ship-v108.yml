@@ -1,6 +1,7 @@
 name: Ship v1.0.8
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main

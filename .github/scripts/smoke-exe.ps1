@@ -180,7 +180,9 @@ try {
     StopAll
     Info "Exe" ("{0} ({1:N1} MB)" -f $Exe, ((Get-Item -LiteralPath $Exe).Length / 1MB))
 
-    # How v1.0.7 wrote it, for an older download: no --tray, different path.
+    # How v1.0.7 wrote it, for an older download: no --tray, different path. Fresh runner
+    # profiles have no Run key at all.
+    if (-not (Test-Path -LiteralPath $runKey)) { New-Item -Path $runKey -Force | Out-Null }
     Set-ItemProperty -Path $runKey -Name "GeckoPeeks" -Value '"C:\Users\Public\Downloads\GeckoPeeks (old).exe"'
 
     # --- Manual launch: window opens, stays open, closes to the tray, reopens from the tray icon.
