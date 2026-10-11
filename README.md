@@ -61,3 +61,5 @@ The tray tooltip looks like `Zayo → Telia sea1 | 61 ms | 2 min ago`. `61 ms` i
 ## Release
 
 GitHub Actions publishes `GeckoPeeks.exe` only on `v*` tag pushes or `workflow_dispatch` (with a tag input). Ordinary pushes to `main` do not overwrite a release.
+
+The main window header shows `v{Version}` so you can confirm the running build. A **LOCAL LOG** strip shows the CSV folder path, last successful write, and **Open log** / **Open folder** / **Copy path** (same actions as the tray).
