@@ -325,6 +325,44 @@ function TextColour([IntPtr]$Form, [IntPtr]$Label) {
     }
 }
 
+function RectOf([IntPtr]$Handle) {
+    $rect = New-Object SmokeWin32+RECT
+    if ($Handle -eq [IntPtr]::Zero -or -not [SmokeWin32]::GetWindowRect($Handle, [ref]$rect)) { return $null }
+    return $rect
+}
+
+function Inside($Inner, $Outer) {
+    return ($Inner.Left -ge $Outer.Left) -and ($Inner.Top -ge $Outer.Top) -and ($Inner.Right -le $Outer.Right) -and ($Inner.Bottom -le $Outer.Bottom)
+}
+
+# Windows clips a child to its parent, so a caption or button that leaves any ancestor's rectangle
+# is drawn cut off (the v1.0.9 LOCAL LOG row hid its caption and the bottom edge of its buttons).
+function StripLayout([IntPtr]$Form) {
+    $problems = [System.Collections.Generic.List[string]]::new()
+    $details = [System.Collections.Generic.List[string]]::new()
+    $formRect = RectOf $Form
+    $targets = [ordered]@{ "LOCAL LOG (CSV)" = "*.STATIC.*"; "Open log" = "*.BUTTON.*"; "Open folder" = "*.BUTTON.*"; "Copy path" = "*.BUTTON.*" }
+    foreach ($text in $targets.Keys) {
+        $handle = ControlWithText $Form $text $targets[$text]
+        $rect = RectOf $handle
+        if ($null -eq $rect) { $problems.Add("'$text' not found"); continue }
+        if (-not [SmokeWin32]::IsWindowVisible($handle)) { $problems.Add("'$text' is hidden"); continue }
+        $details.Add("$text $($rect.Right - $rect.Left)x$($rect.Bottom - $rect.Top) at $($rect.Left - $formRect.Left),$($rect.Top - $formRect.Top)")
+
+        $parent = [SmokeWin32]::GetParent($handle)
+        for ($depth = 0; $depth -lt 10 -and $parent -ne [IntPtr]::Zero; $depth++) {
+            $outer = RectOf $parent
+            if ($null -ne $outer -and -not (Inside $rect $outer)) {
+                $problems.Add("'$text' ($($rect.Left),$($rect.Top))-($($rect.Right),$($rect.Bottom)) leaves its parent ($($outer.Left),$($outer.Top))-($($outer.Right),$($outer.Bottom))")
+                break
+            }
+            if ($parent -eq $Form) { break }
+            $parent = [SmokeWin32]::GetParent($parent)
+        }
+    }
+    [pscustomobject]@{ Problems = $problems; Detail = ($details -join " | ") }
+}
+
 # UI Automation Invoke runs the button's Click on the app's UI thread. BM_CLICK is the fallback.
 function Press([IntPtr]$Form, [string]$Text) {
     $button = ControlWithText $Form $Text "*.BUTTON.*"
@@ -503,6 +541,9 @@ try {
     Check "LOCAL LOG shows the Documents CSV" ($view.File -ieq $logCsv) $view.File
     Check "No 'Could not find file' text in the window" (-not ($view.Texts -match "Could not find file"))
     Notice "normal log" "Logging=$($view.Chip) [$tone] | File=$($view.File) | $($view.Status)"
+    $layout = StripLayout $form
+    Check "LOCAL LOG caption and buttons are drawn whole" ($layout.Problems.Count -eq 0) ($layout.Problems -join "; ")
+    Notice "layout" $layout.Detail
     Screenshot "smoke-window.png"
 
     $handoff = [System.Diagnostics.Stopwatch]::StartNew()
