@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWindowsForms>true</UseWindowsForms>
+    <!-- Lets `dotnet publish -r win-x64` compile on Linux as well as Windows. -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <!-- Keep the published app one exe. Native desktop DLLs extract beside the process at runtime. -->
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <CopyOutputSymbolsToPublishDirectory>false</CopyOutputSymbolsToPublishDirectory>
+    <AssemblyName>GeckoPeeks</AssemblyName>
+    <RootNamespace>GeckoPeeks</RootNamespace>
+    <Version>1.0.0</Version>
+    <AssemblyTitle>Gecko Peeks</AssemblyTitle>
+    <Product>Gecko Peeks</Product>
+    <Description>System-tray monitor for the route to Riot.</Description>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+  </PropertyGroup>
+</Project>
