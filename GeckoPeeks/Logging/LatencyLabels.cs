@@ -42,13 +42,22 @@ public static class LatencyLabels
     /// <summary>Recent-log header for a CSV column. The CSV file keeps its column names.</summary>
     public static string ColumnHeader(string csvColumn) => csvColumn switch
     {
+        "Timestamp" => "Time",
+        "LeagueRunning" => "League",
+        "HandoffNetwork" => "Handoff",
+        "HandoffHost" => "Handoff host",
+        "HandoffIP" => "Handoff IP",
+        "HandoffCity" => "City",
         "HandoffRttMs" => "Handoff ms",
+        "LastHopIP" => "Last hop IP",
+        "LastHopHost" => "Last hop host",
         "LastHopMin" => "Last hop min ms",
         "LastHopAvg" => "Last hop ms",
         "LastHopMax" => "Last hop max ms",
         "LastHopLossPct" => "Last hop loss %",
         "RiotHopAvg" => "Riot ICMP ms",
         "RiotHopLossPct" => "Riot ICMP loss %",
+        "FullPath" => "Full path",
         _ => csvColumn,
     };
 

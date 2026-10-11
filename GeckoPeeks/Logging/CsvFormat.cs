@@ -7,6 +7,8 @@ namespace GeckoPeeks.Logging;
 /// </summary>
 public static class CsvFormat
 {
+    // Grid cells are LogDisplay.Cell and headers are LatencyLabels.ColumnHeader, both by these names.
+    // Add a column here only together with those two. FormatLine and Parse stay in this order.
     public static readonly string[] Columns =
     {
         "Timestamp",
