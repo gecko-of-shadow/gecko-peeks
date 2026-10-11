@@ -18,6 +18,9 @@ public sealed class CsvLog
     private readonly object _gate = new();
     private readonly Func<bool>? _mainUnavailable;
     private readonly UTF8Encoding _utf8 = new(encoderShouldEmitUTF8Identifier: false);
+    private DateTime _lastBackupUtc = DateTime.MinValue;
+    private bool _forceBackup;
+    private static readonly TimeSpan BackupMinInterval = TimeSpan.FromMinutes(30);
 
     public CsvLog(string folder, Func<bool>? mainUnavailable = null)
     {
@@ -39,8 +42,9 @@ public sealed class CsvLog
         var line = CsvFormat.FormatLine(row);
         lock (_gate)
         {
-            Directory.CreateDirectory(Folder);
+            EnsureFolder();
             var unavailable = _mainUnavailable?.Invoke() ?? false;
+            Exception? mainError = null;
             if (!unavailable)
             {
                 try
@@ -51,47 +55,60 @@ public sealed class CsvLog
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
                     unavailable = true;
+                    mainError = ex;
                 }
             }
 
             if (!unavailable)
                 return AppendResult.Main;
 
-            WritePending(line);
-            return AppendResult.Pending;
+            try
+            {
+                WritePending(line);
+                return AppendResult.Pending;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                throw new IOException(
+                    "Could not write the route log under Documents\\RiotRouteLog (main or pending). "
+                    + "If Controlled folder access is on, allow GeckoPeeks.exe under ransomware protection. "
+                    + (mainError?.Message ?? ex.Message),
+                    ex);
+            }
         }
     }
 
     public IReadOnlyList<RouteRow> ReadAll()
     {
-        lock (_gate)
+        // Shared reads do not need the writer lock. Avoid blocking the UI behind
+        // an in-flight append that is flushing and refreshing the backup.
+        var rows = new List<RouteRow>();
+        string? problem = null;
+        try
         {
-            var rows = new List<RouteRow>();
+            rows.AddRange(CsvFormat.Parse(ReadShared(MainPath)));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
             try
             {
-                rows.AddRange(CsvFormat.Parse(ReadShared(MainPath)));
-                ReadProblem = null;
+                rows.AddRange(CsvFormat.Parse(ReadShared(BackupPath)));
+                problem = "Main log is locked. Showing the backup copy.";
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            catch (Exception inner) when (inner is IOException or UnauthorizedAccessException or FileNotFoundException)
             {
-                try
-                {
-                    rows.AddRange(CsvFormat.Parse(ReadShared(BackupPath)));
-                    ReadProblem = "Main log is locked. Showing the backup copy.";
-                }
-                catch (Exception inner) when (inner is IOException or UnauthorizedAccessException or FileNotFoundException)
-                {
-                    ReadProblem = "The log is locked and the backup could not be read.";
-                }
+                problem = "The log is locked and the backup could not be read.";
             }
-
-            rows.AddRange(ReadPendingRows());
-            return rows;
         }
+
+        rows.AddRange(ReadPendingRows());
+        ReadProblem = problem;
+        return rows;
     }
 
     private void WriteMain(string line)
     {
+        EnsureFolder();
         using var stream = OpenExclusive(MainPath);
         MergePending(stream);
         if (stream.Length == 0)
@@ -102,8 +119,27 @@ public sealed class CsvLog
 
     private void WritePending(string line)
     {
-        using var stream = OpenExclusive(PendingPath);
-        WriteFull(stream, _utf8.GetBytes(line));
+        EnsureFolder();
+        var bytes = _utf8.GetBytes(line);
+        try
+        {
+            using var stream = OpenExclusive(PendingPath);
+            WriteFull(stream, bytes);
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            // Controlled folder access and a missing parent can surface as FileNotFound.
+            // Recreate the folder and the pending file explicitly, then append.
+            EnsureFolder();
+            using var stream = new FileStream(PendingPath, FileMode.Create, FileAccess.Write, FileShare.None);
+            stream.Write(bytes, 0, bytes.Length);
+            stream.Flush(true);
+        }
+    }
+
+    private void EnsureFolder()
+    {
+        Directory.CreateDirectory(Folder);
     }
 
     private void MergePending(FileStream main)
@@ -112,11 +148,18 @@ public sealed class CsvLog
         // while also leaving them out of the main file.
         if (File.Exists(PendingPath) && File.Exists(MergingPath))
         {
-            var combined = File.ReadAllText(MergingPath) + File.ReadAllText(PendingPath);
+            var combined = ReadShared(MergingPath) + ReadShared(PendingPath);
             var temp = MergingPath + ".next";
             WriteBytesDurable(temp, _utf8.GetBytes(combined));
             File.Move(temp, MergingPath, overwrite: true);
-            File.Delete(PendingPath);
+            try
+            {
+                File.Delete(PendingPath);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Merging copy has the payload; pending can be cleaned up later.
+            }
         }
         else if (File.Exists(PendingPath))
         {
@@ -126,7 +169,7 @@ public sealed class CsvLog
         if (!File.Exists(MergingPath))
             return;
 
-        var lines = DataLines(File.ReadAllText(MergingPath));
+        var lines = DataLines(ReadShared(MergingPath));
         if (lines.Count == 0)
         {
             File.Delete(MergingPath);
@@ -150,6 +193,7 @@ public sealed class CsvLog
         }
 
         File.Delete(MergingPath);
+        _forceBackup = true;
     }
 
     private static List<string> DataLines(string text)
@@ -202,9 +246,18 @@ public sealed class CsvLog
     private void RefreshBackup(FileStream main)
     {
         // The row is already flushed. A backup failure must not send the same row to pending.
+        // Full-file copy is throttled so OneDrive / AV do not rewrite the whole log every append.
         try
         {
             main.Flush(true);
+            var now = DateTime.UtcNow;
+            var missing = !File.Exists(BackupPath);
+            if (!missing && !_forceBackup && now - _lastBackupUtc < BackupMinInterval)
+            {
+                main.Seek(0, SeekOrigin.End);
+                return;
+            }
+
             var temp = BackupPath + ".tmp";
             using (var dest = new FileStream(temp, FileMode.Create, FileAccess.Write, FileShare.None))
             {
@@ -215,6 +268,8 @@ public sealed class CsvLog
 
             main.Seek(0, SeekOrigin.End);
             File.Move(temp, BackupPath, overwrite: true);
+            _lastBackupUtc = now;
+            _forceBackup = false;
             BackupProblem = null;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -232,8 +287,14 @@ public sealed class CsvLog
         }
     }
 
-    private static FileStream OpenExclusive(string path) =>
-        new(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+    private static FileStream OpenExclusive(string path)
+    {
+        var directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrEmpty(directory))
+            Directory.CreateDirectory(directory);
+
+        return new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+    }
 
     /// <summary>
     /// Writes one complete buffer and flushes it to disk. On failure the file
