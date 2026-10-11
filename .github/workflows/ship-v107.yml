@@ -43,7 +43,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -f -a v1.0.7 -m "Gecko Peeks 1.0.7"
           git push -f origin v1.0.7
-          $notes = "Gecko Peeks 1.0.7 — live hop RTT (Stopwatch TotalMilliseconds; never show 0 ms for replies), UpstreamSummary Riot→LastHop→Handoff, LOCAL LOG strip with Open log/folder/Copy path, visible v1.0.7 in window header. Exit old tray exe before upgrading."
+          $notes = "Gecko Peeks 1.0.7 — live hop RTT (never show 0 ms for replies), UpstreamSummary Riot→LastHop→Handoff, LOCAL LOG strip (Open log/folder/Copy path), Start with Windows checkmark from HKCU, clearer monitor contrast/type/recent-log layout, visible v1.0.7 in header. Exit old tray exe before upgrading."
           gh release view v1.0.7 --json tagName 2>$null
           if ($LASTEXITCODE -eq 0) {
             gh release upload v1.0.7 $exe --clobber
