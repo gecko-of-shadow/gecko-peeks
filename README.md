@@ -44,11 +44,17 @@ dotnet test -c Release
 Join-Path $env:USERPROFILE "Documents\RiotRouteLog\riot-route-log.csv"
 ```
 
-That folder also holds `riot-route-log.pending.csv` (used when Excel has the main file open), `riot-route-log.backup.csv`, `gecko-peeks-settings.json`, and a capped `activity.log`. The main CSV is append-only.
+That folder also holds `riot-route-log.pending.csv` (only while Excel has the main file open; normally it does not exist), `riot-route-log.backup.csv`, `gecko-peeks-settings.json`, and a capped `activity.log`. The main CSV is append-only.
 
-If Windows Controlled folder access blocks Documents, allow `GeckoPeeks.exe` under ransomware protection or the log stays empty.
+If Windows Controlled folder access (ransomware protection) refuses writes in Documents, the log moves here, with the earlier rows copied first:
 
-The window's **LOCAL LOG** strip shows the CSV file path and one status line (last write, or the current problem), with **Open log** / **Open folder** / **Copy path**. The header shows `v{Version}` so you can confirm the running build.
+```powershell
+Join-Path $env:LOCALAPPDATA "GeckoPeeks\RiotRouteLog\riot-route-log.csv"
+```
+
+The Documents copy is left as it was and stays readable. Later runs keep logging in AppData, even after `GeckoPeeks.exe` is allowed, so the rows stay in one file.
+
+The window's **LOCAL LOG** strip shows the CSV in use and one status line (last write, why the log moved, or the current problem), with **Open log** / **Open folder** / **Copy path**, which follow the folder in use. The **Logging** chip says **Blocked** in coral only when neither folder accepts writes. Rows from blocked tests wait in memory (up to 1,000, while the app runs) and are saved by the first test after a folder accepts writes again. If Controlled folder access is the cause, allow `GeckoPeeks.exe` under Ransomware protection. The header shows `v{Version}` so you can confirm the running build.
 
 ## Latency: last hop vs Riot ICMP
 
@@ -81,6 +87,8 @@ The tray tooltip looks like `Zayo → Telia sea1 | last hop 21 ms | 2 min ago` a
 
 GitHub Actions publishes `GeckoPeeks.exe` only on `v*` tag pushes or `workflow_dispatch` (with a tag input). Ordinary pushes to `main` do not overwrite a release.
 
-Before uploading, the release job runs `dotnet test` and `.github/scripts/smoke-exe.ps1` on windows-latest. The smoke launches the published exe and checks that the window opens with the expected version, stays open through the first test, hides to the tray on Close, reopens from a tray click, a tray double-click, and a second launch, starts hidden with `--tray`, repoints a stale Start with Windows value, and leaves no `crash.log`. Load time, memory, and screenshots land in the job summary and the `smoke-v*` artifact.
+Before uploading, the release job runs `dotnet test` and `.github/scripts/smoke-exe.ps1` on windows-latest. The smoke launches the published exe and checks that the window opens with the expected version, stays open through the first test, hides to the tray on Close, reopens from a tray click, a tray double-click, and a second launch, starts hidden with `--tray`, repoints a stale Start with Windows value, and leaves no `crash.log`.
 
-Still checked by hand on a real Windows 11 desktop: clicking the actual tray icon (including from the ^ overflow), the closed-to-tray notification, the Start with Windows checkmark at 125%/150% scaling, and the window coming to the front over other apps.
+It then denies writes to `Documents\RiotRouteLog` with an ACL, the way Controlled folder access refuses them, and checks that the log moves to `%LOCALAPPDATA%\GeckoPeeks\RiotRouteLog` with its rows, that the Documents CSV is unchanged, that **LOCAL LOG** shows the new path with no "Could not find file" text, and that **Open folder** opens it. With AppData denied too, the **Logging** chip must read **Blocked** (in coral) and the status must be one short line. Window text, load time, memory, and screenshots land in the job summary, run annotations, and the `smoke-v*` artifact.
+
+Still checked by hand on a real Windows 11 desktop: clicking the actual tray icon (including from the ^ overflow), the closed-to-tray notification, the Start with Windows checkmark at 125%/150% scaling, the window coming to the front over other apps, and real Controlled folder access (the smoke stands in for it with a deny ACL).

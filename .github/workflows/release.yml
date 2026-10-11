@@ -48,7 +48,7 @@ jobs:
           if ($tag -notmatch '^v\d+\.\d+\.\d+$') {
             throw "Refusing tag '$tag'. Expected vMAJOR.MINOR.PATCH."
           }
-          if ($tag -match '^v1\.0\.[0-8]$') {
+          if ($tag -match '^v1\.0\.[0-9]$') {
             throw "Refusing to overwrite release $tag."
           }
 
