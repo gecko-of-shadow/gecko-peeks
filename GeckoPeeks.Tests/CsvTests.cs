@@ -25,6 +25,18 @@ public class CsvTests
     }
 
     [Fact]
+    public void Prefixes_formula_injection_in_host_fields()
+    {
+        var row = Sample();
+        row.HandoffHost = "=cmd|'/c calc'!A1";
+        row.LastHopHost = "+1234";
+        var line = CsvFormat.FormatLine(row);
+        Assert.Contains("'=cmd|'/c calc'!A1", line, StringComparison.Ordinal);
+        Assert.Contains("'"+1234", line, StringComparison.Ordinal);
+        Assert.DoesNotContain(",=cmd", line, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Append_writes_header_once_backup_and_merges_pending()
     {
         var folder = Path.Combine(Path.GetTempPath(), "gecko-peeks-tests", Guid.NewGuid().ToString("N"));

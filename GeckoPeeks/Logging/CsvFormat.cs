@@ -36,6 +36,14 @@ public static class CsvFormat
     public static string Escape(string? value)
     {
         var text = value ?? "";
+        // Neutralize Excel/Sheets formula injection from attacker-controlled PTR names.
+        if (text.Length > 0)
+        {
+            var first = text[0];
+            if (first is '=' or '+' or '-' or '@' or '\t' or '\r')
+                text = "'" + text;
+        }
+
         if (text.IndexOfAny(new[] { '"', ',', '\r', '\n' }) >= 0)
             return "\"" + text.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
         return text;
