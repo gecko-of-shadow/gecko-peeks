@@ -228,10 +228,10 @@ public class UpstreamSummaryEdgeTests
     [Fact]
     public void Blank_upstream_buckets_as_unknown()
     {
-        var row = new RouteRow { Upstream = "  ", RiotHopAvg = "40" };
+        var row = new RouteRow { Upstream = "  ", LastHopAvg = "40" };
         var summary = Assert.Single(UpstreamSummary.Build(new[] { row }));
         Assert.Equal("Unknown", summary.Upstream);
-        Assert.Equal("40", summary.AvgMs);
+        Assert.Equal("40", summary.LastHopMs);
     }
 
     [Fact]
@@ -239,7 +239,8 @@ public class UpstreamSummaryEdgeTests
     {
         var row = new RouteRow { Upstream = "Zayo", RiotHopAvg = "", LastHopAvg = "", HandoffRttMs = "" };
         var summary = Assert.Single(UpstreamSummary.Build(new[] { row }));
-        Assert.Equal("\u2014", summary.AvgMs);
+        Assert.Equal("\u2014", summary.LastHopMs);
+        Assert.Equal("\u2014", summary.RiotMs);
         Assert.Equal(1, summary.Count);
     }
 
@@ -248,15 +249,15 @@ public class UpstreamSummaryEdgeTests
     {
         var rows = new[]
         {
-            new RouteRow { Upstream = "zayo", RiotHopAvg = "10" },
-            new RouteRow { Upstream = "Zayo", RiotHopAvg = "20" },
-            new RouteRow { Upstream = "Cogent", RiotHopAvg = "30" },
+            new RouteRow { Upstream = "zayo", LastHopAvg = "10" },
+            new RouteRow { Upstream = "Zayo", LastHopAvg = "20" },
+            new RouteRow { Upstream = "Cogent", LastHopAvg = "30" },
         };
         var summary = UpstreamSummary.Build(rows);
         Assert.Equal(2, summary.Count);
         Assert.Equal("zayo", summary[0].Upstream);
         Assert.Equal(2, summary[0].Count);
-        Assert.Equal("15", summary[0].AvgMs);
+        Assert.Equal("15", summary[0].LastHopMs);
         Assert.Equal("Cogent", summary[1].Upstream);
     }
 

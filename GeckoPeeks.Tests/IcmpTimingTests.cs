@@ -44,7 +44,7 @@ public class IcmpTimingTests
 public class UpstreamSummaryTests
 {
     [Fact]
-    public void Avg_uses_riot_when_present()
+    public void Last_hop_and_riot_are_separate_columns()
     {
         var rows = new[]
         {
@@ -55,63 +55,74 @@ public class UpstreamSummaryTests
         var summary = Assert.Single(UpstreamSummary.Build(rows));
         Assert.Equal("Zayo", summary.Upstream);
         Assert.Equal(2, summary.Count);
-        Assert.Equal("60", summary.AvgMs);
+        Assert.Equal("39", summary.LastHopMs);
+        Assert.Equal("60", summary.RiotMs);
     }
 
     [Fact]
-    public void Avg_falls_back_to_last_hop_when_riot_blank()
+    public void Blank_riot_is_never_filled_from_last_hop()
     {
-        var rows = new[]
-        {
-            Sample("Zayo", riot: "", last: "44"),
-        };
-
-        var summary = Assert.Single(UpstreamSummary.Build(rows));
-        Assert.Equal("44", summary.AvgMs);
-        Assert.NotEqual("\u2014", summary.AvgMs);
+        var summary = Assert.Single(UpstreamSummary.Build(new[] { Sample("Zayo", riot: "", last: "44") }));
+        Assert.Equal("44", summary.LastHopMs);
+        Assert.Equal("\u2014", summary.RiotMs);
     }
 
     [Fact]
-    public void Avg_falls_back_to_handoff_rtt()
+    public void Handoff_rtt_is_not_reported_as_last_hop()
     {
         var row = Sample("Zayo", riot: "", last: "");
         row.HandoffRttMs = "37";
         var summary = Assert.Single(UpstreamSummary.Build(new[] { row }));
-        Assert.Equal("37", summary.AvgMs);
+        Assert.Equal("\u2014", summary.LastHopMs);
+        Assert.Equal("\u2014", summary.RiotMs);
     }
 
     [Fact]
-    public void Avg_never_em_dash_when_recent_log_has_last_hop_avg()
+    public void Riot_full_loss_reads_no_reply_and_last_hop_keeps_its_average()
     {
-        // Mirrors gecko's screenshot: LastHopAvg ~19–22, Riot blank → must not show —.
+        // gecko's v1.0.7 screenshot: RiotHopLossPct 100 on every row, LastHopAvg ~19–23.
         var rows = new[]
         {
-            Sample("Zayo", riot: "", last: "19"),
-            Sample("Zayo", riot: "", last: "22"),
-            Sample("Zayo", riot: "", last: "21"),
+            Sample("Zayo", riot: "", last: "19", riotLoss: "100"),
+            Sample("Zayo", riot: "", last: "22", riotLoss: "100"),
+            Sample("Zayo", riot: "", last: "23", riotLoss: "100"),
         };
 
         var summary = Assert.Single(UpstreamSummary.Build(rows));
-        Assert.Equal("21", summary.AvgMs);
-        Assert.NotEqual("\u2014", summary.AvgMs);
-        Assert.True(UpstreamSummary.TryAverageMs(rows[0], out var one));
-        Assert.Equal(19, one);
+        Assert.Equal("21", summary.LastHopMs);
+        Assert.Equal(LatencyLabels.NoReply, summary.RiotMs);
     }
 
     [Fact]
-    public void Avg_ignores_em_dash_placeholder_and_uses_last_hop()
+    public void Riot_average_uses_only_rows_where_riot_answered()
+    {
+        var rows = new[]
+        {
+            Sample("Zayo", riot: "", last: "20", riotLoss: "100"),
+            Sample("Zayo", riot: "58", last: "22", riotLoss: "0"),
+        };
+
+        var summary = Assert.Single(UpstreamSummary.Build(rows));
+        Assert.Equal("58", summary.RiotMs);
+        Assert.Equal("21", summary.LastHopMs);
+    }
+
+    [Fact]
+    public void Em_dash_placeholder_is_not_a_number()
     {
         var row = Sample("Zayo", riot: "\u2014", last: "20");
         var summary = Assert.Single(UpstreamSummary.Build(new[] { row }));
-        Assert.Equal("20", summary.AvgMs);
+        Assert.Equal("20", summary.LastHopMs);
+        Assert.Equal("\u2014", summary.RiotMs);
     }
 
-    private static RouteRow Sample(string upstream, string riot, string last) => new()
+    private static RouteRow Sample(string upstream, string riot, string last, string riotLoss = "") => new()
     {
         Timestamp = "2026-10-11 12:00:00",
         LeagueRunning = "N",
         Upstream = upstream,
         RiotHopAvg = riot,
+        RiotHopLossPct = riotLoss,
         LastHopAvg = last,
         FullPath = "1.1.1.1 > 192.207.0.5",
     };

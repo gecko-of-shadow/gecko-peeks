@@ -1,13 +1,13 @@
 namespace GeckoPeeks.Logging;
 
 /// <summary>
-/// Aggregates CSV rows for the upstream summary grid.
-/// Prefers RiotHopAvg, then LastHopAvg, then HandoffRttMs. Never shows
-/// "\u2014" when any of those fields parse as a number on the rows.
+/// Aggregates CSV rows for the upstream summary grid. Last hop ms averages LastHopAvg only.
+/// Riot ICMP averages RiotHopAvg only and reads "no reply" when every Riot ping was lost.
+/// Sources are never mixed, so a last-hop number is never shown as Riot latency.
 /// </summary>
 public static class UpstreamSummary
 {
-    public sealed record Row(string Upstream, int Count, string AvgMs);
+    public sealed record Row(string Upstream, int Count, string LastHopMs, string RiotMs);
 
     public static IReadOnlyList<Row> Build(IReadOnlyList<RouteRow> rows)
     {
@@ -25,18 +25,22 @@ public static class UpstreamSummary
             }
 
             bucket.Count++;
-            if (TryAverageMs(row, out var avg))
-                bucket.Avgs.Add(avg);
+            if (LatencyLabels.TryParseMs(row.LastHopAvg, out var lastHop))
+                bucket.LastHop.Add(lastHop);
+            if (LatencyLabels.TryParseMs(row.RiotHopAvg, out var riot))
+                bucket.Riot.Add(riot);
+            else if (LatencyLabels.RiotNoReply(row.RiotHopAvg, row.RiotHopLossPct))
+                bucket.RiotNoReply++;
         }
 
         var list = new List<Row>();
         foreach (var pair in groups.OrderByDescending(pair => pair.Value.Count))
         {
-            var samples = pair.Value.Avgs;
-            var avgText = samples.Count == 0
-                ? "\u2014"
-                : Math.Round(samples.Average()).ToString(System.Globalization.CultureInfo.InvariantCulture);
-            list.Add(new Row(pair.Key, pair.Value.Count, avgText));
+            var bucket = pair.Value;
+            var riotText = bucket.Riot.Count > 0
+                ? Average(bucket.Riot)
+                : bucket.RiotNoReply > 0 ? LatencyLabels.NoReply : "\u2014";
+            list.Add(new Row(pair.Key, bucket.Count, Average(bucket.LastHop), riotText));
         }
 
         return list;
@@ -49,47 +53,16 @@ public static class UpstreamSummary
         return (100.0 * count / total).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + "%";
     }
 
-    /// <summary>
-    /// RiotHopAvg, else LastHopAvg, else HandoffRttMs.
-    /// </summary>
-    public static bool TryAverageMs(RouteRow row, out double avg)
-    {
-        if (TryParseMs(row.RiotHopAvg, out avg))
-            return true;
-        if (TryParseMs(row.LastHopAvg, out avg))
-            return true;
-        if (TryParseMs(row.HandoffRttMs, out avg))
-            return true;
-        avg = 0;
-        return false;
-    }
-
-    private static bool TryParseMs(string? text, out double value)
-    {
-        value = 0;
-        if (string.IsNullOrWhiteSpace(text))
-            return false;
-
-        var trimmed = text.Trim();
-        if (trimmed.EndsWith("ms", StringComparison.OrdinalIgnoreCase))
-            trimmed = trimmed[..^2].Trim();
-        if (trimmed.Length == 0)
-            return false;
-
-        // Em dash / placeholders are not averages.
-        if (trimmed == "\u2014" || trimmed == "-" || trimmed.Equals("n/a", StringComparison.OrdinalIgnoreCase))
-            return false;
-
-        return double.TryParse(
-            trimmed,
-            System.Globalization.NumberStyles.Float,
-            System.Globalization.CultureInfo.InvariantCulture,
-            out value);
-    }
+    private static string Average(List<double> samples) =>
+        samples.Count == 0
+            ? "\u2014"
+            : Math.Round(samples.Average()).ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     private sealed class GroupBucket
     {
         public int Count;
-        public List<double> Avgs { get; } = new();
+        public int RiotNoReply;
+        public List<double> LastHop { get; } = new();
+        public List<double> Riot { get; } = new();
     }
 }

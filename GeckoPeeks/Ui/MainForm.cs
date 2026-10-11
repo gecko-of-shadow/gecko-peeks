@@ -16,24 +16,20 @@ internal sealed class MainForm : Form
     private readonly Label _hopsEmpty;
     private readonly Label _logEmpty;
     private readonly Label _summaryEmpty;
+    private readonly Label _summaryHint;
     private readonly Label _modeValue;
     private readonly Label _loggingValue;
     private readonly Label _leagueValue;
     private readonly Label _nextValue;
     private readonly Label _phaseValue;
     private readonly Label _activityValue;
-    private readonly ListBox _activityList;
     private readonly Label _hopsHint;
-    private readonly Label _logFolderValue;
-    private readonly Label _logFileValue;
-    private readonly Label _logWriteValue;
-    private readonly Label _logErrorValue;
+    private readonly Label _logPathValue;
+    private readonly Label _logStatusValue;
     private readonly System.Windows.Forms.Timer _clock;
     private bool _exitRequested;
     private int _hopsRevision = -1;
     private int _logRevision = -1;
-    private string _lastActivityLine = "\u0000";
-    private string _lastLogWriteStatus = "\u0000";
 
     public MainForm(ProbeScheduler scheduler)
     {
@@ -46,9 +42,9 @@ internal sealed class MainForm : Form
         StartPosition = FormStartPosition.CenterScreen;
         AutoScaleMode = AutoScaleMode.Dpi;
         AutoScaleDimensions = new SizeF(96f, 96f);
-        MinimumSize = new Size(960, 760);
+        // Small enough to fit a 1080p screen at 150% scaling.
+        MinimumSize = new Size(880, 640);
         Size = new Size(1200, 860);
-        ShowInTaskbar = false;
         Icon = GeckoMark.CreateIcon();
 
         var root = new TableLayoutPanel
@@ -62,13 +58,13 @@ internal sealed class MainForm : Form
         // Compact chrome up top so traceroute + recent log own the window.
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 68));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 104));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 92));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 112));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 40));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 60));
 
         root.Controls.Add(BuildHeader(version), 0, 0);
-        root.Controls.Add(BuildStatus(out _modeValue, out _loggingValue, out _leagueValue, out _nextValue, out _phaseValue, out _activityValue, out _activityList), 0, 1);
-        root.Controls.Add(BuildLogStrip(out _logFolderValue, out _logFileValue, out _logWriteValue, out _logErrorValue), 0, 2);
+        root.Controls.Add(BuildStatus(out _modeValue, out _loggingValue, out _leagueValue, out _nextValue, out _phaseValue, out _activityValue), 0, 1);
+        root.Controls.Add(BuildLogStrip(out _logPathValue, out _logStatusValue), 0, 2);
 
         _hopsGrid = MakeGrid();
         _hopsGrid.Columns.Add("Hop", "#");
@@ -90,9 +86,21 @@ internal sealed class MainForm : Form
         _summaryGrid = MakeGrid();
         _summaryGrid.Columns.Add("Upstream", "Upstream");
         _summaryGrid.Columns.Add("Share", "Share");
-        _summaryGrid.Columns.Add("Avg", "Avg ms");
-        StyleNumberColumn(_summaryGrid.Columns["Avg"]);
+        _summaryGrid.Columns.Add("LastHop", "Last hop ms");
+        _summaryGrid.Columns.Add("Riot", "Riot ICMP");
+        StyleNumberColumn(_summaryGrid.Columns["LastHop"]);
+        StyleNumberColumn(_summaryGrid.Columns["Riot"]);
         _summaryEmpty = EmptyLabel("No samples yet.");
+        _summaryHint = new Label
+        {
+            Height = 56,
+            ForeColor = Theme.CreamMuted,
+            BackColor = Theme.Charcoal,
+            Font = Theme.Small,
+            Padding = new Padding(6, 2, 6, 2),
+            Text = "Last hop ms = ping to the last router that answered the traceroute "
+                + "(path latency, not in-game ping). Riot ICMP \"no reply\" = Riot filters ping.",
+        };
 
         var body = new TableLayoutPanel
         {
@@ -102,16 +110,16 @@ internal sealed class MainForm : Form
             BackColor = Theme.Jungle,
             Margin = new Padding(0, 4, 0, 0),
         };
-        body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 70));
-        body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
+        body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 62));
+        body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 38));
         body.Controls.Add(Section("Latest traceroute", Wrap(_hopsGrid, _hopsEmpty, _hopsHint)), 0, 0);
-        body.Controls.Add(Section("Upstream summary", Wrap(_summaryGrid, _summaryEmpty, null)), 1, 0);
+        body.Controls.Add(Section("Upstream summary", Wrap(_summaryGrid, _summaryEmpty, _summaryHint)), 1, 0);
         root.Controls.Add(body, 0, 3);
 
         _logGrid = MakeGrid();
         _logGrid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
         foreach (var column in CsvFormat.Columns)
-            _logGrid.Columns.Add(column, column);
+            _logGrid.Columns.Add(column, LatencyLabels.ColumnHeader(column));
         ConfigureLogColumns(_logGrid);
         _logEmpty = EmptyLabel("No rows yet. A finished test appends the first line to the log.");
         root.Controls.Add(Section("Recent log (last 50)", Wrap(_logGrid, _logEmpty, null)), 0, 4);
@@ -124,13 +132,28 @@ internal sealed class MainForm : Form
         OnUpdated(_scheduler.Capture());
     }
 
+    /// <summary>Raised when the window closes to the tray (the app keeps logging).</summary>
+    public event Action? HiddenToTray;
+
+    /// <summary>
+    /// Tray click / double-click, tray Open window, and a second launch all land here.
+    /// ShowInTaskbar stays true: toggling it recreates the window handle, and a hidden
+    /// window has no taskbar button anyway.
+    /// </summary>
     public void ShowFromTray()
     {
-        ShowInTaskbar = true;
+        if (IsDisposed)
+            return;
+
         Show();
-        WindowState = FormWindowState.Normal;
+        if (WindowState == FormWindowState.Minimized)
+            WindowState = FormWindowState.Normal;
+
+        // Activate() can lose to the foreground lock and leave the window behind other
+        // apps. A TopMost toggle still raises it to the top of the z-order.
+        TopMost = true;
+        TopMost = false;
         Activate();
-        BringToFront();
         BindLog();
     }
 
@@ -178,40 +201,54 @@ internal sealed class MainForm : Form
         try
         {
             Clipboard.SetText(_scheduler.Paths.Folder);
-            _logWriteValue.Text = "Copied folder path to clipboard.";
-            _logWriteValue.ForeColor = Theme.Leaf;
+            _logStatusValue.Text = "Copied folder path to clipboard.";
+            _logStatusValue.ForeColor = Theme.Leaf;
         }
         catch
         {
-            _logWriteValue.Text = "Could not copy the folder path.";
-            _logWriteValue.ForeColor = Theme.Coral;
+            _logStatusValue.Text = "Could not copy the folder path.";
+            _logStatusValue.ForeColor = Theme.Coral;
         }
     }
 
+    protected override void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+        FitToWorkingArea();
+    }
+
+    /// <summary>
+    /// Close (X) hides to the tray. Minimize stays on the taskbar like any window. A bare
+    /// WM_CLOSE from outside the app arrives as TaskManagerClosing; it hides too, because a
+    /// disposed form would leave tray Open window with nothing to show.
+    /// </summary>
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
-        if (!_exitRequested && e.CloseReason == CloseReason.UserClosing)
+        if (!_exitRequested
+            && e.CloseReason is CloseReason.UserClosing or CloseReason.TaskManagerClosing or CloseReason.None)
         {
             e.Cancel = true;
-            HideToTray();
+            Hide();
+            HiddenToTray?.Invoke();
             return;
         }
 
         base.OnFormClosing(e);
     }
 
-    protected override void OnResize(EventArgs e)
+    private void FitToWorkingArea()
     {
-        base.OnResize(e);
-        if (WindowState == FormWindowState.Minimized)
-            HideToTray();
-    }
+        var area = Screen.FromControl(this).WorkingArea;
+        var width = Math.Min(Width, area.Width);
+        var height = Math.Min(Height, area.Height);
+        if (width == Width && height == Height && area.Contains(Bounds))
+            return;
 
-    private void HideToTray()
-    {
-        ShowInTaskbar = false;
-        Hide();
-        WindowState = FormWindowState.Normal;
+        Bounds = new Rectangle(
+            area.Left + Math.Max(0, (area.Width - width) / 2),
+            area.Top + Math.Max(0, (area.Height - height) / 2),
+            width,
+            height);
     }
 
     private void OnUpdated(ProbeSnapshot snapshot)
@@ -263,57 +300,38 @@ internal sealed class MainForm : Form
         _nextValue.Text = Countdown(snapshot);
         _phaseValue.Text = string.IsNullOrWhiteSpace(snapshot.Phase) ? "Idle" : snapshot.Phase;
         _phaseValue.ForeColor = PhaseColor(snapshot);
-        var activityLine = string.IsNullOrWhiteSpace(snapshot.ActivityLine)
+        _activityValue.Text = string.IsNullOrWhiteSpace(snapshot.ActivityLine)
             ? "No activity yet."
             : snapshot.ActivityLine;
-        _activityValue.Text = activityLine;
-
-        if (activityLine == _lastActivityLine && _activityList.Items.Count == snapshot.Activity.Count)
-            return;
-        _lastActivityLine = activityLine;
-
-        _activityList.BeginUpdate();
-        _activityList.Items.Clear();
-        foreach (var line in snapshot.Activity)
-            _activityList.Items.Add(line);
-        _activityList.EndUpdate();
     }
 
     private void ApplyLogStrip(ProbeSnapshot snapshot)
     {
-        _logFolderValue.Text = string.IsNullOrWhiteSpace(snapshot.LogFolder)
+        _logPathValue.Text = string.IsNullOrWhiteSpace(snapshot.LogFolder)
             ? "\u2014"
-            : snapshot.LogFolder;
-        _logFileValue.Text = snapshot.LogFileName;
-        _logWriteValue.Text = string.IsNullOrWhiteSpace(snapshot.LogWriteStatus)
-            ? "Waiting for first write"
-            : snapshot.LogWriteStatus;
+            : Path.Combine(snapshot.LogFolder, snapshot.LogFileName);
 
-        if (!string.Equals(snapshot.LogWriteStatus, _lastLogWriteStatus, StringComparison.Ordinal))
-        {
-            _lastLogWriteStatus = snapshot.LogWriteStatus;
-            _logWriteValue.ForeColor = snapshot.LogWriteStatus.StartsWith("Saved", StringComparison.Ordinal)
-                || snapshot.LogWriteStatus.StartsWith("Last saved", StringComparison.Ordinal)
-                ? Theme.Leaf
-                : Theme.Amber;
-        }
-
+        // One status line: a write error beats a read problem beats the last write.
         if (!string.IsNullOrWhiteSpace(snapshot.LogLastError))
         {
-            _logErrorValue.Text = snapshot.LogLastError;
-            _logErrorValue.ForeColor = Theme.Coral;
-            _logErrorValue.Visible = true;
+            _logStatusValue.Text = snapshot.LogLastError;
+            _logStatusValue.ForeColor = Theme.Coral;
         }
         else if (!string.IsNullOrWhiteSpace(snapshot.ReadProblem))
         {
-            _logErrorValue.Text = snapshot.ReadProblem;
-            _logErrorValue.ForeColor = Theme.Amber;
-            _logErrorValue.Visible = true;
+            _logStatusValue.Text = snapshot.ReadProblem;
+            _logStatusValue.ForeColor = Theme.Amber;
         }
         else
         {
-            _logErrorValue.Text = "";
-            _logErrorValue.Visible = false;
+            var status = string.IsNullOrWhiteSpace(snapshot.LogWriteStatus)
+                ? "Waiting for first write"
+                : snapshot.LogWriteStatus;
+            _logStatusValue.Text = status;
+            _logStatusValue.ForeColor = status.StartsWith("Saved", StringComparison.Ordinal)
+                || status.StartsWith("Last saved", StringComparison.Ordinal)
+                ? Theme.Leaf
+                : Theme.Amber;
         }
     }
 
@@ -357,7 +375,8 @@ internal sealed class MainForm : Form
         for (var i = rows.Count - 1; i >= start; i--)
         {
             var row = rows[i];
-            _logGrid.Rows.Add(
+            var riot = LatencyLabels.RiotCell(row.RiotHopAvg, row.RiotHopLossPct);
+            var index = _logGrid.Rows.Add(
                 row.Timestamp,
                 row.LeagueRunning,
                 row.Upstream,
@@ -372,9 +391,11 @@ internal sealed class MainForm : Form
                 row.LastHopAvg,
                 row.LastHopMax,
                 row.LastHopLossPct,
-                row.RiotHopAvg,
+                riot,
                 row.RiotHopLossPct,
                 row.FullPath);
+            if (riot == LatencyLabels.NoReply)
+                _logGrid.Rows[index].Cells["RiotHopAvg"].Style.ForeColor = Theme.CreamMuted;
         }
 
         var noRows = rows.Count == 0;
@@ -403,10 +424,13 @@ internal sealed class MainForm : Form
 
         foreach (var row in UpstreamSummary.Build(rows))
         {
-            _summaryGrid.Rows.Add(
+            var index = _summaryGrid.Rows.Add(
                 row.Upstream,
                 UpstreamSummary.SharePercent(row.Count, rows.Count),
-                row.AvgMs);
+                row.LastHopMs,
+                row.RiotMs);
+            if (row.RiotMs == LatencyLabels.NoReply)
+                _summaryGrid.Rows[index].Cells["Riot"].Style.ForeColor = Theme.CreamMuted;
         }
 
         _summaryEmpty.Visible = false;
@@ -490,7 +514,8 @@ internal sealed class MainForm : Form
         };
         var subtitle = new Label
         {
-            Text = "Traceroute to Riot. Closes to the tray - Exit quits. Build " + version + ".",
+            Text = "Traceroute to Riot. Close (X) keeps logging in the tray: click the gecko tray icon "
+                + "or right-click > Open window to come back. Exit quits.",
             Font = Theme.Small,
             ForeColor = Theme.CreamMuted,
             Dock = DockStyle.Fill,
@@ -504,24 +529,23 @@ internal sealed class MainForm : Form
         return header;
     }
 
-    private Control BuildLogStrip(
-        out Label folder,
-        out Label file,
-        out Label write,
-        out Label error)
+    /// <summary>
+    /// Title + buttons, the full CSV path, then one status line with room for two lines
+    /// of text (a long Controlled folder access error must not be clipped away).
+    /// </summary>
+    private Control BuildLogStrip(out Label path, out Label status)
     {
         var panel = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 4,
+            RowCount = 3,
             BackColor = Theme.Panel,
             Padding = new Padding(10, 6, 10, 6),
             Margin = new Padding(0, 4, 0, 0),
         };
+        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 20));
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 20));
         panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
         var titleRow = new TableLayoutPanel
@@ -557,45 +581,21 @@ internal sealed class MainForm : Form
         titleRow.Controls.Add(title, 0, 0);
         titleRow.Controls.Add(buttons, 1, 0);
 
-        folder = StripLine(out var folderHost, "Folder");
-        file = StripLine(out var fileHost, "File");
-        write = new Label
+        path = StripLine(out var pathHost, "File");
+        status = new Label
         {
             Dock = DockStyle.Fill,
-            ForeColor = Theme.Cream,
+            ForeColor = Theme.Amber,
             Font = Theme.Body,
-            TextAlign = ContentAlignment.MiddleLeft,
+            TextAlign = ContentAlignment.TopLeft,
             AutoEllipsis = true,
+            Margin = new Padding(0, 2, 0, 0),
             Text = "Waiting for first write",
         };
-        error = new Label
-        {
-            Dock = DockStyle.Fill,
-            ForeColor = Theme.Coral,
-            Font = Theme.Small,
-            TextAlign = ContentAlignment.MiddleLeft,
-            AutoEllipsis = true,
-            Text = "",
-            Visible = false,
-        };
-
-        var writeHost = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            ColumnCount = 1,
-            RowCount = 2,
-            BackColor = Theme.Panel,
-            Margin = new Padding(0),
-        };
-        writeHost.RowStyles.Add(new RowStyle(SizeType.Absolute, 22));
-        writeHost.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        writeHost.Controls.Add(write, 0, 0);
-        writeHost.Controls.Add(error, 0, 1);
 
         panel.Controls.Add(titleRow, 0, 0);
-        panel.Controls.Add(folderHost, 0, 1);
-        panel.Controls.Add(fileHost, 0, 2);
-        panel.Controls.Add(writeHost, 0, 3);
+        panel.Controls.Add(pathHost, 0, 1);
+        panel.Controls.Add(status, 0, 2);
         return panel;
     }
 
@@ -660,8 +660,7 @@ internal sealed class MainForm : Form
         out Label league,
         out Label next,
         out Label phase,
-        out Label activity,
-        out ListBox activityList)
+        out Label activity)
     {
         var panel = new TableLayoutPanel
         {
@@ -695,16 +694,7 @@ internal sealed class MainForm : Form
         panel.Controls.Add(phase, 0, 1);
         panel.SetColumnSpan(phase, 4);
 
-        var activityHost = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            ColumnCount = 1,
-            RowCount = 2,
-            Margin = new Padding(0),
-            BackColor = Theme.Charcoal,
-        };
-        activityHost.RowStyles.Add(new RowStyle(SizeType.Absolute, 20));
-        activityHost.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        // Latest activity only; the full history is in activity.log beside the CSV.
         activity = new Label
         {
             Dock = DockStyle.Fill,
@@ -712,22 +702,11 @@ internal sealed class MainForm : Form
             Font = Theme.Body,
             TextAlign = ContentAlignment.MiddleLeft,
             AutoEllipsis = true,
+            Margin = new Padding(0),
             Text = "No activity yet.",
         };
-        activityList = new ListBox
-        {
-            Dock = DockStyle.Fill,
-            BackColor = Theme.JungleDeep,
-            ForeColor = Theme.Cream,
-            BorderStyle = BorderStyle.None,
-            Font = Theme.Body,
-            IntegralHeight = false,
-            ItemHeight = 20,
-        };
-        activityHost.Controls.Add(activity, 0, 0);
-        activityHost.Controls.Add(activityList, 0, 1);
-        panel.Controls.Add(activityHost, 0, 2);
-        panel.SetColumnSpan(activityHost, 4);
+        panel.Controls.Add(activity, 0, 2);
+        panel.SetColumnSpan(activity, 4);
         return panel;
     }
 
@@ -865,8 +844,9 @@ internal sealed class MainForm : Form
     }
 
     /// <summary>
-    /// Puts Timestamp / Upstream / city / latency up front, freezes the first two,
-    /// and keeps horizontal scroll for the long FullPath tail.
+    /// Puts Timestamp / Upstream / city / last-hop latency up front, freezes the first two,
+    /// and keeps horizontal scroll for the long FullPath tail. Riot ICMP sits after the
+    /// path numbers because Riot usually filters ping.
     /// </summary>
     private static void ConfigureLogColumns(DataGridView grid)
     {
@@ -875,10 +855,10 @@ internal sealed class MainForm : Form
             "Timestamp",
             "Upstream",
             "HandoffCity",
-            "HandoffRttMs",
             "LastHopAvg",
-            "RiotHopAvg",
             "LastHopLossPct",
+            "HandoffRttMs",
+            "RiotHopAvg",
             "RiotHopLossPct",
             "LeagueRunning",
             "HandoffNetwork",
