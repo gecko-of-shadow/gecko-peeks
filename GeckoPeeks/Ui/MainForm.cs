@@ -4,6 +4,7 @@ using GeckoPeeks.App;
 using GeckoPeeks.Logging;
 using GeckoPeeks.Net;
 using GeckoPeeks.Routing;
+using GeckoPeeks.Text;
 
 namespace GeckoPeeks.Ui;
 
@@ -85,7 +86,7 @@ internal sealed class MainForm : Form
 
         _summaryGrid = MakeGrid();
         _summaryGrid.Columns.Add("Upstream", "Upstream");
-        _summaryGrid.Columns.Add("Share", "Share");
+        _summaryGrid.Columns.Add("Share", "Share · samples");
         _summaryGrid.Columns.Add("LastHop", "Last hop ms");
         _summaryGrid.Columns.Add("Riot", "Riot ICMP");
         StyleNumberColumn(_summaryGrid.Columns["LastHop"]);
@@ -93,13 +94,12 @@ internal sealed class MainForm : Form
         _summaryEmpty = EmptyLabel("No samples yet.");
         _summaryHint = new Label
         {
-            Height = 56,
+            Height = 40,
             ForeColor = Theme.CreamMuted,
             BackColor = Theme.Charcoal,
             Font = Theme.Small,
             Padding = new Padding(6, 2, 6, 2),
-            Text = "Last hop ms = ping to the last router that answered the traceroute "
-                + "(path latency, not in-game ping). Riot ICMP \"no reply\" = Riot filters ping.",
+            Text = "Last hop ms is path latency, not in-game ping. Riot ICMP \"no reply\" means Riot filtered ping.",
         };
 
         var body = new TableLayoutPanel
@@ -200,13 +200,13 @@ internal sealed class MainForm : Form
     {
         try
         {
-            Clipboard.SetText(_scheduler.Paths.Folder);
-            _logStatusValue.Text = "Copied folder path to clipboard.";
+            Clipboard.SetText(_scheduler.Log.MainPath);
+            _logStatusValue.Text = LogDisplay.CopiedFileStatus;
             _logStatusValue.ForeColor = Theme.Leaf;
         }
         catch
         {
-            _logStatusValue.Text = "Could not copy the folder path.";
+            _logStatusValue.Text = "Could not copy the log path.";
             _logStatusValue.ForeColor = Theme.Coral;
         }
     }
@@ -286,8 +286,7 @@ internal sealed class MainForm : Form
         // (and the activity ListBox) refresh on scheduler Updated events.
         var snapshot = _scheduler.Capture();
         _nextValue.Text = Countdown(snapshot);
-        _phaseValue.Text = string.IsNullOrWhiteSpace(snapshot.Phase) ? "Idle" : snapshot.Phase;
-        _phaseValue.ForeColor = PhaseColor(snapshot);
+        ApplyHeadline(snapshot);
     }
 
     private void ApplyStatus(ProbeSnapshot snapshot)
@@ -298,8 +297,7 @@ internal sealed class MainForm : Form
         _leagueValue.Text = snapshot.LeagueRunning ? "Running" : "Not running";
         _leagueValue.ForeColor = snapshot.LeagueRunning ? Theme.Amber : Theme.Cream;
         _nextValue.Text = Countdown(snapshot);
-        _phaseValue.Text = string.IsNullOrWhiteSpace(snapshot.Phase) ? "Idle" : snapshot.Phase;
-        _phaseValue.ForeColor = PhaseColor(snapshot);
+        ApplyHeadline(snapshot);
         _activityValue.Text = string.IsNullOrWhiteSpace(snapshot.ActivityLine)
             ? "No activity yet."
             : snapshot.ActivityLine;
@@ -354,6 +352,7 @@ internal sealed class MainForm : Form
         _hopsHint.Text = snapshot.HopsAreAddressesOnly
             ? "IPs restored from the log (no per-hop RTT in CSV). Hostnames and RTTs return on the next test."
             : "";
+        _hopsHint.Height = _hopsHint.Text.Length == 0 ? 0 : 20;
     }
 
     private void BindLog()
@@ -375,25 +374,12 @@ internal sealed class MainForm : Form
         for (var i = rows.Count - 1; i >= start; i--)
         {
             var row = rows[i];
-            var riot = LatencyLabels.RiotCell(row.RiotHopAvg, row.RiotHopLossPct);
-            var index = _logGrid.Rows.Add(
-                row.Timestamp,
-                row.LeagueRunning,
-                row.Upstream,
-                row.HandoffNetwork,
-                row.HandoffHost,
-                row.HandoffIP,
-                row.HandoffCity,
-                row.HandoffRttMs,
-                row.LastHopIP,
-                row.LastHopHost,
-                row.LastHopMin,
-                row.LastHopAvg,
-                row.LastHopMax,
-                row.LastHopLossPct,
-                riot,
-                row.RiotHopLossPct,
-                row.FullPath);
+            var values = new object[CsvFormat.Columns.Length];
+            for (var column = 0; column < CsvFormat.Columns.Length; column++)
+                values[column] = LogDisplay.Cell(row, CsvFormat.Columns[column]);
+            var riotIndex = Array.IndexOf(CsvFormat.Columns, "RiotHopAvg");
+            var riot = riotIndex >= 0 ? (string)values[riotIndex] : "";
+            var index = _logGrid.Rows.Add(values);
             if (riot == LatencyLabels.NoReply)
                 _logGrid.Rows[index].Cells["RiotHopAvg"].Style.ForeColor = Theme.CreamMuted;
         }
@@ -426,7 +412,7 @@ internal sealed class MainForm : Form
         {
             var index = _summaryGrid.Rows.Add(
                 row.Upstream,
-                UpstreamSummary.SharePercent(row.Count, rows.Count),
+                UpstreamSummary.ShareLabel(row.Count, rows.Count),
                 row.LastHopMs,
                 row.RiotMs);
             if (row.RiotMs == LatencyLabels.NoReply)
@@ -456,9 +442,16 @@ internal sealed class MainForm : Form
         return $"{Math.Max(0, delta.Seconds)} s";
     }
 
+    private void ApplyHeadline(ProbeSnapshot snapshot)
+    {
+        _phaseValue.Text = WindowStatus.Headline(
+            snapshot.TestRunning, snapshot.Phase, snapshot.LastError, snapshot.Tooltip);
+        _phaseValue.ForeColor = PhaseColor(snapshot);
+    }
+
     private static Color PhaseColor(ProbeSnapshot snapshot)
     {
-        if (!string.IsNullOrWhiteSpace(snapshot.LastError) || snapshot.Phase.StartsWith("Error", StringComparison.OrdinalIgnoreCase) || snapshot.Phase.StartsWith("Last test problem", StringComparison.Ordinal))
+        if (WindowStatus.IsTrouble(snapshot.Phase, snapshot.LastError))
             return Theme.Coral;
         if (snapshot.TestRunning)
             return Theme.Amber;
@@ -688,6 +681,7 @@ internal sealed class MainForm : Form
             ForeColor = Theme.Cream,
             Font = Theme.Body,
             TextAlign = ContentAlignment.MiddleLeft,
+            AutoEllipsis = true,
             Text = "Idle",
             Margin = new Padding(0),
         };
