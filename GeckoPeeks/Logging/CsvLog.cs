@@ -42,7 +42,15 @@ public sealed class CsvLog
         var line = CsvFormat.FormatLine(row);
         lock (_gate)
         {
-            EnsureFolder();
+            try
+            {
+                EnsureFolder();
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                throw AccessDenied(ex, mainError: null);
+            }
+
             var unavailable = _mainUnavailable?.Invoke() ?? false;
             Exception? mainError = null;
             if (!unavailable)
@@ -69,14 +77,17 @@ public sealed class CsvLog
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                throw new IOException(
-                    "Could not write the route log under Documents\\RiotRouteLog (main or pending). "
-                    + "If Controlled folder access is on, allow GeckoPeeks.exe under ransomware protection. "
-                    + (mainError?.Message ?? ex.Message),
-                    ex);
+                throw AccessDenied(ex, mainError);
             }
         }
     }
+
+    private static IOException AccessDenied(Exception ex, Exception? mainError) =>
+        new(
+            "Could not write the route log under Documents\\RiotRouteLog (main or pending). "
+            + "If Controlled folder access is on, allow GeckoPeeks.exe under ransomware protection. "
+            + (mainError?.Message ?? ex.Message),
+            ex);
 
     public IReadOnlyList<RouteRow> ReadAll()
     {
