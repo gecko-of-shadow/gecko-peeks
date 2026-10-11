@@ -35,6 +35,14 @@ public static class IcmpTiming
     }
 
     /// <summary>
+    /// True once <paramref name="giveUpAfter"/> pings went out and none came back. Riot filters
+    /// echo on many paths; waiting out the rest of the series only delays the log row.
+    /// Zero means never give up early.
+    /// </summary>
+    public static bool ShouldGiveUp(int sent, int replies, int giveUpAfter) =>
+        giveUpAfter > 0 && replies == 0 && sent >= giveUpAfter;
+
+    /// <summary>
     /// Live-table / hop RTT text. Never shows "0 ms" for a hop that replied —
     /// sub-millisecond (rounded &lt; 1) becomes "&lt;1 ms".
     /// </summary>

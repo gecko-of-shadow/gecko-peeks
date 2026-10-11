@@ -20,6 +20,7 @@ public sealed class SavedResult
     public string HandoffCity { get; set; } = "";
     public string HandoffRttMs { get; set; } = "";
     public string RiotHopAvg { get; set; } = "";
+    public string LastHopAvg { get; set; } = "";
     public string FullPath { get; set; } = "";
 }
 

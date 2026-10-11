@@ -1,3 +1,5 @@
+using System.Runtime.InteropServices;
+
 namespace GeckoPeeks.App;
 
 /// <summary>
@@ -29,6 +31,17 @@ public sealed class SingleInstance : IDisposable
             var mutex = new Mutex(initiallyOwned: true, MutexName, out var created);
             if (!created)
             {
+                try
+                {
+                    // This launch holds the user's foreground right (Explorer, a taskbar pin).
+                    // Hand it on so the first instance can raise its window instead of flashing.
+                    AllowSetForegroundWindow(AsfwAny);
+                }
+                catch
+                {
+                    // The window still opens, possibly behind the active app.
+                }
+
                 try
                 {
                     using var existing = EventWaitHandle.OpenExisting(ShowEventName);
@@ -103,4 +116,10 @@ public sealed class SingleInstance : IDisposable
         _show?.Dispose();
         _mutex?.Dispose();
     }
+
+    private const int AsfwAny = -1;
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool AllowSetForegroundWindow(int processId);
 }
