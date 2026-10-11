@@ -59,7 +59,8 @@ internal sealed class MainForm : Form
         // Compact chrome up top so traceroute + recent log own the window.
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 68));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 104));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 112));
+        // The LOCAL LOG strip sizes itself from its content, so its buttons are never clipped.
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 40));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 60));
 
@@ -240,6 +241,9 @@ internal sealed class MainForm : Form
     private void FitToWorkingArea()
     {
         var area = Screen.FromControl(this).WorkingArea;
+        // A 768-pixel laptop screen at 125% is shorter than the scaled minimum height. Let the
+        // window shrink to the screen instead of running off the bottom behind the taskbar.
+        MinimumSize = new Size(Math.Min(MinimumSize.Width, area.Width), Math.Min(MinimumSize.Height, area.Height));
         var width = Math.Min(Width, area.Width);
         var height = Math.Min(Height, area.Height);
         if (width == Width && height == Height && area.Contains(Bounds))
@@ -528,32 +532,41 @@ internal sealed class MainForm : Form
     /// <summary>
     /// Title + buttons, the full CSV path, then one status line with room for two lines
     /// of text (a long Controlled folder access error must not be clipped away).
+    /// Every row here is sized from its content. The old fixed 30-pixel title row measured its
+    /// non-AutoSize button panel at the 200x100 default, so the inner row grew to 100 pixels:
+    /// the caption was pushed out of view and the buttons lost their bottom edge.
     /// </summary>
     private Control BuildLogStrip(out Label path, out Label status)
     {
         var panel = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
             ColumnCount = 1,
             RowCount = 3,
             BackColor = Theme.Panel,
             Padding = new Padding(10, 6, 10, 6),
             Margin = new Padding(0, 4, 0, 0),
         };
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+        panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));
-        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
         var titleRow = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
             ColumnCount = 2,
             RowCount = 1,
             BackColor = Theme.Panel,
             Margin = new Padding(0),
         };
         titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-        titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 320));
+        titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        titleRow.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         var title = new Label
         {
             Text = "LOCAL LOG (CSV)",
@@ -561,10 +574,13 @@ internal sealed class MainForm : Form
             ForeColor = Theme.Amber,
             Font = Theme.Section,
             TextAlign = ContentAlignment.MiddleLeft,
+            Margin = new Padding(0, 0, 8, 0),
         };
         var buttons = new FlowLayoutPanel
         {
             Dock = DockStyle.Fill,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
             FlowDirection = FlowDirection.RightToLeft,
             WrapContents = false,
             BackColor = Theme.Panel,
@@ -581,6 +597,8 @@ internal sealed class MainForm : Form
         status = new Label
         {
             Dock = DockStyle.Fill,
+            // Two lines of body text. The auto-sized row reserves exactly this height.
+            Height = 44,
             ForeColor = Theme.Amber,
             Font = Theme.Body,
             TextAlign = ContentAlignment.TopLeft,
@@ -614,6 +632,7 @@ internal sealed class MainForm : Form
             ForeColor = Theme.CreamMuted,
             Font = Theme.Small,
             TextAlign = ContentAlignment.MiddleLeft,
+            Margin = new Padding(0),
         };
         var value = new Label
         {
@@ -623,6 +642,7 @@ internal sealed class MainForm : Form
             Font = Theme.Small,
             TextAlign = ContentAlignment.MiddleLeft,
             AutoEllipsis = true,
+            Margin = new Padding(0),
         };
         row.Controls.Add(cap, 0, 0);
         row.Controls.Add(value, 1, 0);
