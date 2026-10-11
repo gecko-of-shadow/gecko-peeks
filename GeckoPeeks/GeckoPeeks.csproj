@@ -21,7 +21,7 @@
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
   </PropertyGroup>
 
-  <!-- Materialize the Win32 .ico from the text-safe base64 sibling before resources compile. -->
+  <!-- Generate the Win32 .ico from the original gecko mark before resources compile. -->
   <Target Name="MaterializeApplicationIcon" BeforeTargets="PrepareForBuild">
     <PropertyGroup>
       <_GeckoIconScript>$(MSBuildProjectDirectory)\Assets\Write-GeckoIcon.ps1</_GeckoIconScript>
