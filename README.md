@@ -75,7 +75,7 @@ Each responding hop is checked for official domains (`zayo.com`, `cogentco.com`,
 
 If that choice is wrong for your path, the rule lives in `GeckoPeeks/Routing/RouteClassifier.cs`.
 
-The tray tooltip looks like `Zayo → Telia sea1 | last hop 21 ms | 2 min ago` and names where its number came from: `Riot 61 ms` when Riot answered ping, else `last hop`, else `handoff` (the handoff hop's traceroute RTT). A balloon fires only when the upstream or the handoff city changes after the first logged test, and not when either side is blank/`Unknown`. City names in the balloon (`den3` → Denver, `sea1` → Seattle) are display-only; the CSV stores the code.
+The tray tooltip looks like `Zayo → Telia sea1 | last hop 21 ms | 2 min ago` and names where its number came from: `Riot 61 ms` when Riot answered ping, else `last hop`, else `handoff` (the handoff hop's traceroute RTT). While a test is not running and the last test did not fail, the window status line shows that same sentence. During a test, or after a failed test, it shows the phase instead. A balloon fires only when the upstream or the handoff city changes after the first logged test, and not when either side is blank/`Unknown`. City names in the balloon (`den3` → Denver, `sea1` → Seattle) are display-only; the CSV stores the code. The recent-log City column shows the code and the name together (`sea1 · Seattle`). League shows Yes/No on screen; the CSV still stores `Y`/`N`. Copy path copies the CSV file path.
 
 ## Release
 
