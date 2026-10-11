@@ -11,6 +11,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly ToolStripMenuItem _pauseItem;
     private readonly ToolStripMenuItem _startupItem;
     private readonly System.Windows.Forms.Timer _clock;
+    private bool _exiting;
 
     public TrayApplicationContext(SingleInstance instance)
     {
@@ -124,6 +125,10 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     private async void Exit()
     {
+        if (_exiting)
+            return;
+        _exiting = true;
+
         _clock.Stop();
         try
         {
