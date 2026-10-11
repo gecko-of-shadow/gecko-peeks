@@ -28,12 +28,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _icon.DoubleClick += (_, _) => _form.ShowFromTray();
 
         _pauseItem = new ToolStripMenuItem("Pause logging");
-        _startupItem = new ToolStripMenuItem("Start with Windows")
-        {
-            CheckOnClick = false,
-            ForeColor = Theme.Cream,
-        };
-        _startupItem.Click += (_, _) => ToggleStartup();
+        _startupItem = new ToolStripMenuItem("Start with Windows") { CheckOnClick = false };
         _icon.ContextMenuStrip = BuildMenu();
 
         _scheduler.Updated += snapshot =>
@@ -50,7 +45,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
         instance.Listen(() => _form.BeginInvoke(new Action(_form.ShowFromTray)));
         _scheduler.Start();
-        SyncStartupChecked();
+        _startupItem.Checked = StartupRegistration.IsEnabled();
         SystemEvents.SessionEnding += OnSessionEnding;
 
         _clock = new System.Windows.Forms.Timer { Interval = 15000 };
@@ -60,17 +55,13 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     private ContextMenuStrip BuildMenu()
     {
-        // ShowCheckMargin is required for ToolStripMenuItem.Checked glyphs.
-        // ShowImageMargin=false alone hides the check column entirely.
         var menu = new ContextMenuStrip
         {
             BackColor = Theme.Charcoal,
             ForeColor = Theme.Cream,
             Renderer = new ToolStripProfessionalRenderer(new MenuColors()),
-            ShowImageMargin = true,
-            ShowCheckMargin = true,
+            ShowImageMargin = false,
         };
-        menu.Opening += (_, _) => SyncStartupChecked();
 
         menu.Items.Add(Item("Run test now", (_, _) => _scheduler.RunNow()));
         menu.Items.Add(Item("Open log", (_, _) => _form.OpenLog()));
@@ -78,6 +69,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _pauseItem.ForeColor = Theme.Cream;
         _pauseItem.Click += (_, _) => _scheduler.TogglePause();
         menu.Items.Add(_pauseItem);
+        _startupItem.ForeColor = Theme.Cream;
+        _startupItem.Click += (_, _) => ToggleStartup();
         menu.Items.Add(_startupItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(Item("Exit", (_, _) => Exit()));
@@ -88,23 +81,14 @@ internal sealed class TrayApplicationContext : ApplicationContext
     {
         try
         {
-            var want = !StartupRegistration.IsEnabled();
-            StartupRegistration.SetEnabled(want);
+            StartupRegistration.SetEnabled(!_startupItem.Checked);
+            _startupItem.Checked = StartupRegistration.IsEnabled();
         }
         catch
         {
-            SyncStartupChecked();
+            _startupItem.Checked = false;
             _form.ShowFromTray();
-            return;
         }
-
-        // Reflect the real HKCU Run value, not the intended toggle.
-        SyncStartupChecked();
-    }
-
-    private void SyncStartupChecked()
-    {
-        _startupItem.Checked = StartupRegistration.IsEnabled();
     }
 
     private void OnSessionEnding(object? sender, SessionEndingEventArgs e)
@@ -181,9 +165,6 @@ internal sealed class TrayApplicationContext : ApplicationContext
         public override Color ImageMarginGradientBegin => Theme.Charcoal;
         public override Color ImageMarginGradientMiddle => Theme.Charcoal;
         public override Color ImageMarginGradientEnd => Theme.Charcoal;
-        public override Color CheckBackground => Theme.Jungle;
-        public override Color CheckSelectedBackground => Theme.Jungle;
-        public override Color CheckPressedBackground => Theme.Panel;
         public override Color SeparatorDark => Theme.Line;
         public override Color SeparatorLight => Theme.Line;
     }
