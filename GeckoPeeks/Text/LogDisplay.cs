@@ -55,6 +55,6 @@ public static class LogDisplay
         if (string.Equals(name, trimmed, StringComparison.OrdinalIgnoreCase))
             return trimmed;
 
-        return trimmed + " \u00b7 " + name;
+        return trimmed + " · " + name;
     }
 }

@@ -53,6 +53,10 @@ public static class UpstreamSummary
         return (100.0 * count / total).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + "%";
     }
 
+    /// <summary>Share plus how many rows it came from, so 100% of one sample is not read as a trend.</summary>
+    public static string ShareLabel(int count, int total) =>
+        SharePercent(count, total) + " · " + count.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
     private static string Average(List<double> samples) =>
         samples.Count == 0
             ? "\u2014"
