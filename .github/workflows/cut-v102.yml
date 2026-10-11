@@ -1,0 +1,40 @@
+name: Cut v1.0.2 tag
+
+# One-shot helper: when this file lands on main, create tag v1.0.2 once.
+# The tags-only Release workflow then builds and uploads GeckoPeeks.exe.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/cut-v102.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create tag v1.0.2 if missing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view v1.0.2 --json tagName >/dev/null 2>&1; then
+            echo "Release v1.0.2 already exists; nothing to do."
+            exit 0
+          fi
+          if git ls-remote --tags origin "refs/tags/v1.0.2" | grep -q .; then
+            echo "Tag v1.0.2 already on origin; nothing to do."
+            exit 0
+          fi
+          git config user.name "gecko-peeks-ci"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a v1.0.2 -m "Gecko Peeks 1.0.2"
+          git push origin v1.0.2
