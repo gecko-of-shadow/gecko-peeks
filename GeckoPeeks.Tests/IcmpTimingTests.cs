@@ -14,13 +14,31 @@ public class IcmpTimingTests
     public void ResolveRttMs_prefers_api_then_elapsed(long api, long elapsed, long expected) =>
         Assert.Equal(expected, IcmpTiming.ResolveRttMs(api, elapsed));
 
+    [Theory]
+    [InlineData(0, 0.4, 0)]     // <0.5 ms rounds to 0; FormatHopRtt shows "<1 ms"
+    [InlineData(0, 0.5, 1)]
+    [InlineData(0, 19.4, 19)]
+    [InlineData(0, 19.6, 20)]
+    [InlineData(22, 40.2, 22)]  // positive API still wins
+    public void ResolveRttMs_uses_fractional_elapsed(long api, double elapsed, long expected) =>
+        Assert.Equal(expected, IcmpTiming.ResolveRttMs(api, elapsed));
+
     [Fact]
     public void ResolveRespondedRttMs_is_null_when_silent() =>
         Assert.Null(IcmpTiming.ResolveRespondedRttMs(false, 0, 40));
 
     [Fact]
     public void ResolveRespondedRttMs_uses_elapsed_when_api_is_zero() =>
-        Assert.Equal(40, IcmpTiming.ResolveRespondedRttMs(true, 0, 40));
+        Assert.Equal(40, IcmpTiming.ResolveRespondedRttMs(true, 0, 40.0));
+
+    [Theory]
+    [InlineData(true, 0L, "<1 ms")]
+    [InlineData(true, 1L, "1 ms")]
+    [InlineData(true, 19L, "19 ms")]
+    [InlineData(false, 19L, "")]
+    [InlineData(true, null, "")]
+    public void FormatHopRtt_never_shows_zero_ms_for_reply(bool responded, long? rtt, string expected) =>
+        Assert.Equal(expected, IcmpTiming.FormatHopRtt(responded, rtt));
 }
 
 public class UpstreamSummaryTests
@@ -62,6 +80,32 @@ public class UpstreamSummaryTests
         Assert.Equal("37", summary.AvgMs);
     }
 
+    [Fact]
+    public void Avg_never_em_dash_when_recent_log_has_last_hop_avg()
+    {
+        // Mirrors gecko's screenshot: LastHopAvg ~19–22, Riot blank → must not show —.
+        var rows = new[]
+        {
+            Sample("Zayo", riot: "", last: "19"),
+            Sample("Zayo", riot: "", last: "22"),
+            Sample("Zayo", riot: "", last: "21"),
+        };
+
+        var summary = Assert.Single(UpstreamSummary.Build(rows));
+        Assert.Equal("21", summary.AvgMs);
+        Assert.NotEqual("\u2014", summary.AvgMs);
+        Assert.True(UpstreamSummary.TryAverageMs(rows[0], out var one));
+        Assert.Equal(19, one);
+    }
+
+    [Fact]
+    public void Avg_ignores_em_dash_placeholder_and_uses_last_hop()
+    {
+        var row = Sample("Zayo", riot: "\u2014", last: "20");
+        var summary = Assert.Single(UpstreamSummary.Build(new[] { row }));
+        Assert.Equal("20", summary.AvgMs);
+    }
+
     private static RouteRow Sample(string upstream, string riot, string last) => new()
     {
         Timestamp = "2026-10-11 12:00:00",
@@ -96,6 +140,9 @@ public class PendingLogTests
             Assert.True(File.Exists(log.PendingPath));
             Assert.Contains("Zayo", File.ReadAllText(log.PendingPath), StringComparison.Ordinal);
             Assert.Contains("61", File.ReadAllText(log.PendingPath), StringComparison.Ordinal);
+            Assert.Equal(AppendResult.Pending, log.LastAppendResult);
+            Assert.NotNull(log.LastSuccessfulWriteLocal);
+            Assert.Equal(log.PendingPath, log.LastSuccessfulWritePath);
         }
         finally
         {
