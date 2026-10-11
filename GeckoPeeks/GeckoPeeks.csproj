@@ -10,7 +10,7 @@
     <CopyOutputSymbolsToPublishDirectory>false</CopyOutputSymbolsToPublishDirectory>
     <AssemblyName>GeckoPeeks</AssemblyName>
     <RootNamespace>GeckoPeeks</RootNamespace>
-    <Version>1.0.1</Version>
+    <Version>1.0.2</Version>
     <AssemblyTitle>Gecko Peeks</AssemblyTitle>
     <Product>Gecko Peeks</Product>
     <Description>System-tray monitor for the route to Riot.</Description>
@@ -18,4 +18,19 @@
     <ApplicationIcon>Assets\gecko-peeks.ico</ApplicationIcon>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
   </PropertyGroup>
+
+  <!-- Decode Assets/gecko-peeks.ico.b64 when the binary .ico is missing (fresh clone). -->
+  <Target Name="EnsureApplicationIcon" BeforeTargets="PrepareForBuild">
+    <PropertyGroup>
+      <_IconFile>$([System.IO.Path]::Combine('$(MSBuildProjectDirectory)', 'Assets', 'gecko-peeks.ico'))</_IconFile>
+      <_IconB64>$([System.IO.Path]::Combine('$(MSBuildProjectDirectory)', 'Assets', 'gecko-peeks.ico.b64'))</_IconB64>
+    </PropertyGroup>
+    <Error Condition="!Exists('$(_IconB64)')" Text="Missing $(_IconB64). Restore the icon base64 before building." />
+    <Exec Condition="!Exists('$(_IconFile)') AND $([MSBuild]::IsOSPlatform('Windows'))"
+          Command="certutil -decode &quot;$(_IconB64)&quot; &quot;$(_IconFile)&quot;"
+          IgnoreStandardErrorWarningFormat="true" />
+    <Exec Condition="!Exists('$(_IconFile)') AND !$([MSBuild]::IsOSPlatform('Windows'))"
+          Command="base64 -d &quot;$(_IconB64)&quot; &gt; &quot;$(_IconFile)&quot;" />
+    <Error Condition="!Exists('$(_IconFile)')" Text="Could not materialize $(_IconFile) from $(_IconB64)." />
+  </Target>
 </Project>
