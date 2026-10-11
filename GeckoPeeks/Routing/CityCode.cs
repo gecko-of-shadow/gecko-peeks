@@ -1,12 +1,13 @@
 using System.Text.RegularExpressions;
+using GeckoPeeks.Text;
 
 namespace GeckoPeeks.Routing;
 
 /// <summary>
 /// Pulls a city code out of a router hostname.
-/// Tokens are split on '.' and '-'. The first token matching
-/// ^[a-zA-Z]{2,4}\d{0,2}$ wins when it contains a digit (sea1, den3, yyc2)
-/// or is a 3-letter token that is not a generic word (chi, but not net/core).
+/// Tokens are split on '.' and '-'. Interface/role tokens (ae5, ccr31, core1)
+/// are skipped. Prefer a token whose letter prefix is a known city, otherwise
+/// the first remaining city-shaped token with a digit, otherwise a bare 3-letter city.
 /// </summary>
 public static partial class CityCode
 {
@@ -14,6 +15,16 @@ public static partial class CityCode
     {
         "net", "com", "org", "dns", "ptr", "rev", "www", "core", "edge", "agg",
         "peer", "rtr", "xe", "et", "ae", "ge", "lo", "ip", "be", "to", "of",
+        "cr", "ccr", "po", "te", "hu", "mpr", "br", "bb", "ic",
+    };
+
+    /// <summary>
+    /// Letter prefixes of interface / role tokens, with or without trailing digits.
+    /// </summary>
+    private static readonly string[] InterfacePrefixes =
+    {
+        "ae", "be", "xe", "et", "ge", "po", "te", "hu", "cr", "ccr", "core",
+        "agg", "edge", "mpr", "br", "bb", "lo", "ic", "peer", "rtr",
     };
 
     public static string Extract(string? hostname)
@@ -22,31 +33,73 @@ public static partial class CityCode
             return "";
 
         var tokens = hostname.Split(new[] { '.', '-' }, StringSplitOptions.RemoveEmptyEntries);
+        string? firstDigitCity = null;
+        string? firstBareCity = null;
+
         foreach (var token in tokens)
         {
             if (!TokenPattern().IsMatch(token))
                 continue;
+            if (IsInterfaceOrRole(token))
+                continue;
 
-            var hasDigit = false;
-            foreach (var ch in token)
+            var lower = token.ToLowerInvariant();
+            var hasDigit = HasDigit(token);
+            var letters = LettersOnly(token);
+
+            if (hasDigit)
             {
-                if (char.IsDigit(ch))
-                {
-                    hasDigit = true;
-                    break;
-                }
+                if (CityNames.IsKnownCode(letters) || CityNames.IsKnownCode(lower))
+                    return lower;
+                firstDigitCity ??= lower;
+                continue;
             }
 
-            // A digit is enough (sea1, be12). Generic words are excluded only
-            // for the 3-letter, no-digit case (chi is kept, net/core are not).
-            if (hasDigit)
-                return token.ToLowerInvariant();
-
             if (token.Length == 3 && !Generic.Contains(token))
-                return token.ToLowerInvariant();
+            {
+                if (CityNames.IsKnownCode(lower))
+                    return lower;
+                firstBareCity ??= lower;
+            }
         }
 
-        return "";
+        return firstDigitCity ?? firstBareCity ?? "";
+    }
+
+    private static bool IsInterfaceOrRole(string token)
+    {
+        var letters = LettersOnly(token);
+        foreach (var prefix in InterfacePrefixes)
+        {
+            if (string.Equals(letters, prefix, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return Generic.Contains(token) || Generic.Contains(letters);
+    }
+
+    private static bool HasDigit(string token)
+    {
+        foreach (var ch in token)
+        {
+            if (char.IsDigit(ch))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static string LettersOnly(string token)
+    {
+        var chars = new char[token.Length];
+        var n = 0;
+        foreach (var ch in token)
+        {
+            if (char.IsLetter(ch))
+                chars[n++] = ch;
+        }
+
+        return n == 0 ? "" : new string(chars, 0, n);
     }
 
     [GeneratedRegex("^[a-zA-Z]{2,4}[0-9]{0,2}$", RegexOptions.CultureInvariant)]
