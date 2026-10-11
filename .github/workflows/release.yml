@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag (for example v1.0.2). Required when not running from a tag push."
+        description: "Release tag (for example v1.0.9). Required when not running from a tag push."
         required: false
         type: string
 
@@ -17,6 +17,7 @@ permissions:
 jobs:
   publish:
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -25,6 +26,34 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
+
+      - name: Resolve tag
+        id: tag
+        shell: pwsh
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $tag = $null
+          if ($env:GITHUB_REF_TYPE -eq "tag") {
+            $tag = $env:GITHUB_REF_NAME
+          }
+          elseif (-not [string]::IsNullOrWhiteSpace($env:INPUT_TAG)) {
+            $tag = $env:INPUT_TAG.Trim()
+          }
+          else {
+            throw "Set a tag ref (push v*) or pass workflow_dispatch input tag (for example v1.0.9)."
+          }
+
+          if ($tag -notmatch '^v\d+\.\d+\.\d+$') {
+            throw "Refusing tag '$tag'. Expected vMAJOR.MINOR.PATCH."
+          }
+          if ($tag -match '^v1\.0\.[0-8]$') {
+            throw "Refusing to overwrite release $tag."
+          }
+
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "version=$($tag.Substring(1))" >> $env:GITHUB_OUTPUT
 
       - name: Materialize application icon
         shell: pwsh
@@ -47,11 +76,23 @@ jobs:
         working-directory: GeckoPeeks
         run: dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
 
+      - name: Smoke-run GeckoPeeks.exe
+        shell: pwsh
+        run: ./.github/scripts/smoke-exe.ps1 -Exe "GeckoPeeks\bin\Release\net8.0-windows\win-x64\publish\GeckoPeeks.exe" -ExpectVersion "${{ steps.tag.outputs.version }}" -OutDir smoke
+
+      - name: Upload smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-${{ steps.tag.outputs.tag }}
+          path: smoke
+          if-no-files-found: warn
+
       - name: Create release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          INPUT_TAG: ${{ inputs.tag }}
+          TAG: ${{ steps.tag.outputs.tag }}
         run: |
           $ErrorActionPreference = "Stop"
           $exe = Join-Path (Get-Location) "GeckoPeeks\bin\Release\net8.0-windows\win-x64\publish\GeckoPeeks.exe"
@@ -59,34 +100,14 @@ jobs:
             throw "Published exe was not found at $exe"
           }
 
-          $tag = $null
-          if ($env:GITHUB_REF_TYPE -eq "tag") {
-            $tag = $env:GITHUB_REF_NAME
-          }
-          elseif (-not [string]::IsNullOrWhiteSpace($env:INPUT_TAG)) {
-            $tag = $env:INPUT_TAG.Trim()
-          }
-          else {
-            throw "Set a tag ref (push v*) or pass workflow_dispatch input tag (for example v1.0.2)."
-          }
+          $notes = "Gecko Peeks $($env:TAG.Substring(1)). Exit the old tray app (right-click the gecko > Exit) before running the new GeckoPeeks.exe."
 
-          if ($tag -notmatch '^v\d+\.\d+\.\d+') {
-            throw "Refusing tag '$tag'. Expected vMAJOR.MINOR.PATCH."
-          }
-          if ($tag -eq "v1.0.0" -or $tag -eq "v1.0.1" -or $tag -eq "v1.0.2" -or $tag -eq "v1.0.3" -or $tag -eq "v1.0.4" -or $tag -eq "v1.0.5" -or $tag -eq "v1.0.6") {
-            throw "Refusing to overwrite release $tag."
-          }
-
-          $notes = @"
-          Gecko Peeks $($tag.Substring(1)) — live hop RTT, summary Avg fallback, LOCAL LOG strip, Start with Windows checkmark, clearer monitor contrast/type/log table, visible v{Version}.
-          "@
-
-          gh release view $tag --json tagName 2>$null
+          gh release view $env:TAG --json tagName 2>$null
           if ($LASTEXITCODE -eq 0) {
-            gh release upload $tag $exe --clobber
+            gh release upload $env:TAG $exe --clobber
           }
           else {
-            gh release create $tag $exe --title $tag --notes $notes.Trim()
+            gh release create $env:TAG $exe --title $env:TAG --notes $notes
           }
 
           if ($LASTEXITCODE -ne 0) {

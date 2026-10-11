@@ -9,6 +9,7 @@ on:
       - ".github/workflows/ship-v102.yml"
       - ".github/workflows/cut-v102.yml"
       - ".github/workflows/retag-v102.yml"
+      - ".github/workflows/ship-v*.yml"
 
 permissions:
   contents: read

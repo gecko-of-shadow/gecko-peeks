@@ -7,7 +7,7 @@ namespace GeckoPeeks;
 internal static class Program
 {
     [STAThread]
-    private static void Main()
+    private static void Main(string[] args)
     {
         var instance = SingleInstance.Acquire();
         if (!instance.IsFirst)
@@ -36,7 +36,9 @@ internal static class Program
             args.SetObserved();
         };
 
-        Application.Run(new TrayApplicationContext(instance));
+        var startHidden = args.Any(arg =>
+            string.Equals(arg, StartupRegistration.TrayArgument, StringComparison.OrdinalIgnoreCase));
+        Application.Run(new TrayApplicationContext(instance, showWindow: !startHidden));
         instance.Dispose();
     }
 }

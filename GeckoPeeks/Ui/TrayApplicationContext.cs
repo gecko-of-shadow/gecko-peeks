@@ -1,4 +1,6 @@
+using System.Drawing.Drawing2D;
 using GeckoPeeks.App;
+using GeckoPeeks.Text;
 using Microsoft.Win32;
 
 namespace GeckoPeeks.Ui;
@@ -8,12 +10,14 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly NotifyIcon _icon;
     private readonly MainForm _form;
     private readonly ProbeScheduler _scheduler;
+    private readonly StartupToggle _startup = new(StartupRegistration.IsEnabled, StartupRegistration.SetEnabled);
     private readonly ToolStripMenuItem _pauseItem;
     private readonly ToolStripMenuItem _startupItem;
     private readonly System.Windows.Forms.Timer _clock;
     private bool _exiting;
+    private bool _closedHintShown;
 
-    public TrayApplicationContext(SingleInstance instance)
+    public TrayApplicationContext(SingleInstance instance, bool showWindow)
     {
         _scheduler = new ProbeScheduler(LogPaths.Resolve());
         _form = new MainForm(_scheduler);
@@ -25,21 +29,25 @@ internal sealed class TrayApplicationContext : ApplicationContext
             Visible = true,
             Text = "Gecko Peeks — no route yet",
         };
-        _icon.DoubleClick += (_, _) => _form.ShowFromTray();
-
-        _pauseItem = new ToolStripMenuItem("Pause logging");
-        _startupItem = new ToolStripMenuItem("Start with Windows")
+        // Windows 11 tucks new tray icons under the ^ overflow, where a double-click is easy to
+        // miss. A single left click opens the window too.
+        _icon.MouseClick += (_, e) =>
         {
-            CheckOnClick = false,
-            ForeColor = Theme.Cream,
+            if (e.Button == MouseButtons.Left)
+                _form.ShowFromTray();
         };
-        _startupItem.Click += (_, _) => ToggleStartup();
+        _icon.DoubleClick += (_, _) => _form.ShowFromTray();
+        _icon.BalloonTipClicked += (_, _) => _form.ShowFromTray();
+        _form.HiddenToTray += ShowClosedHint;
+
+        _pauseItem = CommandItem(TrayCommand.TogglePause);
+        _startupItem = CommandItem(TrayCommand.StartWithWindows);
         _icon.ContextMenuStrip = BuildMenu();
 
         _scheduler.Updated += snapshot =>
         {
             _icon.Text = Fit(snapshot.Tooltip);
-            _pauseItem.Text = snapshot.Paused ? "Resume logging" : "Pause logging";
+            _pauseItem.Text = TrayMenu.Label(TrayCommand.TogglePause, snapshot.Paused);
         };
         _scheduler.RouteChanged += message =>
         {
@@ -50,12 +58,16 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
         instance.Listen(() => _form.BeginInvoke(new Action(_form.ShowFromTray)));
         _scheduler.Start();
-        SyncStartupChecked();
+        StartupRegistration.RepairIfStale();
+        _startupItem.Checked = _startup.Checked;
         SystemEvents.SessionEnding += OnSessionEnding;
 
         _clock = new System.Windows.Forms.Timer { Interval = 15000 };
         _clock.Tick += (_, _) => _icon.Text = Fit(_scheduler.Capture().Tooltip);
         _clock.Start();
+
+        if (showWindow)
+            _form.ShowFromTray();
     }
 
     private ContextMenuStrip BuildMenu()
@@ -66,45 +78,85 @@ internal sealed class TrayApplicationContext : ApplicationContext
         {
             BackColor = Theme.Charcoal,
             ForeColor = Theme.Cream,
-            Renderer = new ToolStripProfessionalRenderer(new MenuColors()),
+            Renderer = new TrayMenuRenderer(),
             ShowImageMargin = true,
             ShowCheckMargin = true,
         };
-        menu.Opening += (_, _) => SyncStartupChecked();
+        menu.Opening += (_, _) => _startupItem.Checked = _startup.Checked;
 
-        menu.Items.Add(Item("Run test now", (_, _) => _scheduler.RunNow()));
-        menu.Items.Add(Item("Open log", (_, _) => _form.OpenLog()));
-        menu.Items.Add(Item("Open log folder", (_, _) => _form.OpenLogFolder()));
-        _pauseItem.ForeColor = Theme.Cream;
-        _pauseItem.Click += (_, _) => _scheduler.TogglePause();
-        menu.Items.Add(_pauseItem);
-        menu.Items.Add(_startupItem);
-        menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(Item("Exit", (_, _) => Exit()));
+        foreach (var entry in TrayMenu.Layout)
+        {
+            if (entry is not { } command)
+            {
+                menu.Items.Add(new ToolStripSeparator());
+                continue;
+            }
+
+            var item = command switch
+            {
+                TrayCommand.TogglePause => _pauseItem,
+                TrayCommand.StartWithWindows => _startupItem,
+                _ => CommandItem(command),
+            };
+            if (command == TrayMenu.DefaultCommand)
+                item.Font = new Font(menu.Font, FontStyle.Bold);
+            menu.Items.Add(item);
+        }
+
         return menu;
+    }
+
+    private ToolStripMenuItem CommandItem(TrayCommand command)
+    {
+        var item = new ToolStripMenuItem(TrayMenu.Label(command)) { ForeColor = Theme.Cream };
+        item.Click += (_, _) => Run(command);
+        return item;
+    }
+
+    private void Run(TrayCommand command)
+    {
+        switch (command)
+        {
+            case TrayCommand.OpenWindow:
+                _form.ShowFromTray();
+                break;
+            case TrayCommand.RunTestNow:
+                _scheduler.RunNow();
+                break;
+            case TrayCommand.OpenLog:
+                _form.OpenLog();
+                break;
+            case TrayCommand.OpenLogFolder:
+                _form.OpenLogFolder();
+                break;
+            case TrayCommand.TogglePause:
+                _scheduler.TogglePause();
+                break;
+            case TrayCommand.StartWithWindows:
+                ToggleStartup();
+                break;
+            case TrayCommand.Exit:
+                Exit();
+                break;
+        }
     }
 
     private void ToggleStartup()
     {
-        try
-        {
-            var want = !StartupRegistration.IsEnabled();
-            StartupRegistration.SetEnabled(want);
-        }
-        catch
-        {
-            SyncStartupChecked();
+        if (!_startup.Toggle())
             _form.ShowFromTray();
-            return;
-        }
 
         // Reflect the real HKCU Run value, not the intended toggle.
-        SyncStartupChecked();
+        _startupItem.Checked = _startup.Checked;
     }
 
-    private void SyncStartupChecked()
+    private void ShowClosedHint()
     {
-        _startupItem.Checked = StartupRegistration.IsEnabled();
+        if (_closedHintShown || _exiting)
+            return;
+
+        _closedHintShown = true;
+        _icon.ShowBalloonTip(6000, TrayMenu.ClosedHintTitle, TrayMenu.ClosedHintText, ToolTipIcon.Info);
     }
 
     private void OnSessionEnding(object? sender, SessionEndingEventArgs e)
@@ -159,14 +211,44 @@ internal sealed class TrayApplicationContext : ApplicationContext
         ExitThread();
     }
 
-    private static ToolStripMenuItem Item(string text, EventHandler onClick)
-    {
-        var item = new ToolStripMenuItem(text) { ForeColor = Theme.Cream };
-        item.Click += onClick;
-        return item;
-    }
-
     private static string Fit(string text) => text.Length <= 127 ? text : text[..127];
+
+    /// <summary>
+    /// The stock check glyph is black and vanishes on jungle green. Draw a cream tick in an
+    /// amber-edged box so the checkmark reads on both the idle and the hover background.
+    /// </summary>
+    private sealed class TrayMenuRenderer : ToolStripProfessionalRenderer
+    {
+        public TrayMenuRenderer()
+            : base(new MenuColors())
+        {
+        }
+
+        protected override void OnRenderItemCheck(ToolStripItemImageRenderEventArgs e)
+        {
+            var g = e.Graphics;
+            var box = Rectangle.Inflate(e.ImageRectangle, 1, 1);
+            using (var fill = new SolidBrush(Theme.Jungle))
+                g.FillRectangle(fill, box);
+            using (var border = new Pen(Theme.Amber))
+                g.DrawRectangle(border, box.X, box.Y, box.Width - 1, box.Height - 1);
+
+            var smoothing = g.SmoothingMode;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            using (var tick = new Pen(Theme.Cream, Math.Max(2f, box.Height / 7f)))
+            {
+                tick.StartCap = LineCap.Round;
+                tick.EndCap = LineCap.Round;
+                tick.LineJoin = LineJoin.Round;
+                g.DrawLines(tick, new[] { At(box, 0.24f, 0.52f), At(box, 0.43f, 0.70f), At(box, 0.77f, 0.31f) });
+            }
+
+            g.SmoothingMode = smoothing;
+        }
+
+        private static PointF At(Rectangle box, float x, float y) =>
+            new(box.X + box.Width * x, box.Y + box.Height * y);
+    }
 
     private sealed class MenuColors : ProfessionalColorTable
     {
