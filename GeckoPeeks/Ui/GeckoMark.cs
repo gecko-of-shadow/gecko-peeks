@@ -45,9 +45,12 @@ internal static class GeckoMark
     /// <summary>
     /// Prefer the Win32 icon embedded via ApplicationIcon (Explorer / shortcuts / taskbar),
     /// then fall back to the drawn mark for design-time or odd hosts.
+    /// Pass <paramref name="preferredSize"/> (for example <see cref="SystemInformation.SmallIconSize"/>)
+    /// so the tray gets a sharp small glyph instead of a downscaled 32px frame.
     /// </summary>
-    public static Icon CreateIcon()
+    public static Icon CreateIcon(Size? preferredSize = null)
     {
+        var size = preferredSize ?? new Size(32, 32);
         try
         {
             var path = Application.ExecutablePath;
@@ -55,7 +58,7 @@ internal static class GeckoMark
             {
                 using var associated = Icon.ExtractAssociatedIcon(path);
                 if (associated != null)
-                    return (Icon)associated.Clone();
+                    return new Icon(associated, size);
             }
         }
         catch
@@ -63,12 +66,12 @@ internal static class GeckoMark
             // Fall back to the drawn mark.
         }
 
-        using var bitmap = CreateBitmap(32);
+        using var bitmap = CreateBitmap(Math.Max(size.Width, size.Height));
         var handle = bitmap.GetHicon();
         try
         {
             using var temp = Icon.FromHandle(handle);
-            return (Icon)temp.Clone();
+            return new Icon(temp, size);
         }
         finally
         {
