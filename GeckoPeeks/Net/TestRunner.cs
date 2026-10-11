@@ -172,19 +172,35 @@ public static class TestRunner
             }
         }
 
+        var dnsIndexes = new List<int>();
         for (var i = 0; i < hops.Count; i++)
         {
-            if (!hops[i].Responded)
-                continue;
+            if (hops[i].Responded)
+                dnsIndexes.Add(i);
+        }
 
-            cancellationToken.ThrowIfCancellationRequested();
-            Report(progress, $"DNS hop {hops[i].Number}/{MaxHops}", hops);
-            var hostname = await ReverseDnsAsync(hops[i].Ip).ConfigureAwait(false);
-            hops[i] = hops[i] with { Hostname = hostname };
-            Report(progress, $"DNS hop {hops[i].Number}/{MaxHops}", hops);
+        if (dnsIndexes.Count > 0)
+        {
+            Report(progress, $"DNS {dnsIndexes.Count} hops", hops);
+            var tasks = new Task[dnsIndexes.Count];
+            for (var t = 0; t < dnsIndexes.Count; t++)
+            {
+                var index = dnsIndexes[t];
+                tasks[t] = ResolveHopDnsAsync(hops, index, cancellationToken);
+            }
+
+            await Task.WhenAll(tasks).ConfigureAwait(false);
+            Report(progress, "DNS done", hops);
         }
 
         return hops;
+    }
+
+    private static async Task ResolveHopDnsAsync(List<HopObservation> hops, int index, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var hostname = await ReverseDnsAsync(hops[index].Ip).ConfigureAwait(false);
+        hops[index] = hops[index] with { Hostname = hostname };
     }
 
     private static async Task<string> ReverseDnsAsync(string ip)
