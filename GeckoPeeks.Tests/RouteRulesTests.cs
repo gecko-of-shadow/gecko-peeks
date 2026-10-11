@@ -113,20 +113,27 @@ public class RouteClassifierTests
 public class TooltipAndBalloonTests
 {
     [Fact]
-    public void Tooltip_uses_riot_average_and_relative_time()
+    public void Tooltip_labels_riot_average_and_relative_time()
     {
         var now = new DateTime(2026, 10, 11, 12, 2, 0);
         var then = now.AddMinutes(-2);
-        var text = TooltipText.Format("Zayo", "Telia", "sea1", "61", "40", then, now);
-        Assert.Equal("Zayo → Telia sea1 | 61 ms | 2 min ago", text);
+        var text = TooltipText.Format("Zayo", "Telia", "sea1", "61", "21", "40", then, now);
+        Assert.Equal("Zayo → Telia sea1 | Riot 61 ms | 2 min ago", text);
     }
 
     [Fact]
-    public void Tooltip_falls_back_to_handoff_rtt()
+    public void Tooltip_falls_back_to_labeled_last_hop_then_handoff()
     {
         var now = new DateTime(2026, 10, 11, 12, 0, 30);
-        var text = TooltipText.Format("Zayo", "Telia", "sea1", "", "40", now, now);
-        Assert.Equal("Zayo → Telia sea1 | 40 ms | just now", text);
+        Assert.Equal(
+            "Zayo → Telia sea1 | last hop 21 ms | just now",
+            TooltipText.Format("Zayo", "Telia", "sea1", "", "21", "40", now, now));
+        Assert.Equal(
+            "Zayo → Telia sea1 | handoff 40 ms | just now",
+            TooltipText.Format("Zayo", "Telia", "sea1", "", "", "40", now, now));
+        Assert.Equal(
+            "Zayo → Telia sea1 | n/a | just now",
+            TooltipText.Format("Zayo", "Telia", "sea1", "", "", "", now, now));
     }
 
     [Fact]

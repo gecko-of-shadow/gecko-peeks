@@ -24,6 +24,8 @@ public static class TestRunner
     public const int HopTimeoutMs = 1000;
     public const int DnsTimeoutMs = 800;
     public const int PingCount = 10;
+    /// <summary>The Riot series stops after this many pings with no reply (100% loss either way).</summary>
+    public const int RiotGiveUpAfter = 3;
     /// <summary>Stop traceroute after this many silent hops past the last responder (or from the start).</summary>
     public const int MaxConsecutiveSilentHops = 5;
 
@@ -100,7 +102,8 @@ public static class TestRunner
                 PingCount,
                 HopTimeoutMs,
                 index => Report(progress, $"Ping Riot {index}/{PingCount}", hops),
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken,
+                RiotGiveUpAfter).ConfigureAwait(false);
             row.RiotHopAvg = riot.Avg;
             row.RiotHopLossPct = riot.LossPct;
         }
@@ -226,7 +229,8 @@ public static class TestRunner
         int count,
         int timeoutMs,
         Action<int> onEach,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        int giveUpAfter = 0)
     {
         var sent = 0;
         var ok = 0;
@@ -239,6 +243,8 @@ public static class TestRunner
         for (var i = 1; i <= count; i++)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (IcmpTiming.ShouldGiveUp(sent, ok, giveUpAfter))
+                break;
             onEach(i);
             sent++;
             try

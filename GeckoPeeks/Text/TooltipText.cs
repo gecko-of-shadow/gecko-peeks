@@ -1,3 +1,5 @@
+using GeckoPeeks.Logging;
+
 namespace GeckoPeeks.Text;
 
 public static class TooltipText
@@ -7,6 +9,7 @@ public static class TooltipText
         string? handoffNetwork,
         string? handoffCity,
         string? riotHopAvg,
+        string? lastHopAvg,
         string? handoffRttMs,
         DateTime? timestampLocal,
         DateTime now)
@@ -21,8 +24,7 @@ public static class TooltipText
         var provider = string.IsNullOrWhiteSpace(upstream) ? "Unknown" : upstream.Trim();
         var network = string.IsNullOrWhiteSpace(handoffNetwork) ? "Unknown" : handoffNetwork.Trim();
         var city = string.IsNullOrWhiteSpace(handoffCity) ? "" : " " + handoffCity.Trim();
-        var milliseconds = First(riotHopAvg, handoffRttMs);
-        var latency = string.IsNullOrWhiteSpace(milliseconds) ? "n/a" : milliseconds.Trim() + " ms";
+        var latency = LatencyLabels.Tooltip(riotHopAvg, lastHopAvg, handoffRttMs);
         var when = timestampLocal == null ? "just now" : Ago(timestampLocal.Value, now);
         var text = $"{provider} → {network}{city} | {latency} | {when}";
         return text.Length <= 127 ? text : text[..127];
@@ -51,12 +53,5 @@ public static class TooltipText
 
         var days = Math.Max(1, (int)Math.Round(delta.TotalDays));
         return days == 1 ? "1 day ago" : $"{days} days ago";
-    }
-
-    private static string First(string? primary, string? fallback)
-    {
-        if (!string.IsNullOrWhiteSpace(primary))
-            return primary;
-        return fallback ?? "";
     }
 }

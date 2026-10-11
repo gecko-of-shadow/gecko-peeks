@@ -49,6 +49,7 @@ public sealed class ProbeScheduler : IDisposable
     private bool _acceptRuns = true;
     private bool _hasPrevious;
     private bool _hopsAreAddressesOnly;
+    private bool _riotNoReplyNoted;
     private int _runRequested;
     private int _hopsRevision;
     private int _logRevision = 1;
@@ -62,6 +63,7 @@ public sealed class ProbeScheduler : IDisposable
     private string _tipNetwork = "";
     private string _tipCity = "";
     private string _tipRiot = "";
+    private string _tipLastHop = "";
     private string _tipHandoffRtt = "";
     private string _logWriteStatus = "Waiting for first write";
     private DateTime? _tipTimestamp;
@@ -444,6 +446,12 @@ public sealed class ProbeScheduler : IDisposable
                 ? flash
                 : "Appended a row with blanks after a problem: " + row.Error);
 
+        if (!_riotNoReplyNoted && LatencyLabels.RiotNoReply(row.RiotHopAvg, row.RiotHopLossPct))
+        {
+            _riotNoReplyNoted = true;
+            Note($"Riot ICMP ({TestRunner.RiotPingTarget}) gave no reply (Riot filters ping). Latency shown is the last hop (path), not in-game ping.");
+        }
+
         if (!string.IsNullOrWhiteSpace(row.Error))
         {
             lock (_gate)
@@ -466,6 +474,7 @@ public sealed class ProbeScheduler : IDisposable
         _tipNetwork = row.HandoffNetwork;
         _tipCity = row.HandoffCity;
         _tipRiot = row.RiotHopAvg;
+        _tipLastHop = row.LastHopAvg;
         _tipHandoffRtt = row.HandoffRttMs;
         if (DateTime.TryParseExact(
                 row.Timestamp,
@@ -540,6 +549,7 @@ public sealed class ProbeScheduler : IDisposable
         _tipNetwork = last.HandoffNetwork;
         _tipCity = last.HandoffCity;
         _tipRiot = last.RiotHopAvg;
+        _tipLastHop = last.LastHopAvg;
         _tipHandoffRtt = last.HandoffRttMs;
         if (DateTime.TryParseExact(
                 last.Timestamp,
@@ -580,6 +590,7 @@ public sealed class ProbeScheduler : IDisposable
         _tipNetwork = last.HandoffNetwork;
         _tipCity = last.HandoffCity;
         _tipRiot = last.RiotHopAvg;
+        _tipLastHop = last.LastHopAvg;
         _tipHandoffRtt = last.HandoffRttMs;
         if (DateTime.TryParseExact(
                 last.Timestamp,
@@ -628,6 +639,7 @@ public sealed class ProbeScheduler : IDisposable
                     HandoffCity = row.HandoffCity,
                     HandoffRttMs = row.HandoffRttMs,
                     RiotHopAvg = row.RiotHopAvg,
+                    LastHopAvg = row.LastHopAvg,
                     FullPath = row.FullPath,
                 };
                 settings.Hops = row.Hops.Select(hop => new SavedHop
@@ -650,6 +662,7 @@ public sealed class ProbeScheduler : IDisposable
                     HandoffCity = _tipCity,
                     HandoffRttMs = _tipHandoffRtt,
                     RiotHopAvg = _tipRiot,
+                    LastHopAvg = _tipLastHop,
                     FullPath = RouteClassifier.BuildFullPath(_hops),
                 };
                 settings.Hops = _hops.Select(hop => new SavedHop
@@ -716,7 +729,7 @@ public sealed class ProbeScheduler : IDisposable
             ReadProblem = _csv.ReadProblem ?? "",
             HopsRevision = _hopsRevision,
             LogRevision = _logRevision,
-            Tooltip = TooltipText.Format(_tipUpstream, _tipNetwork, _tipCity, _tipRiot, _tipHandoffRtt, _tipTimestamp, now),
+            Tooltip = TooltipText.Format(_tipUpstream, _tipNetwork, _tipCity, _tipRiot, _tipLastHop, _tipHandoffRtt, _tipTimestamp, now),
             LogFolder = Paths.Folder,
             LogFileName = "riot-route-log.csv",
             LogWriteStatus = _logWriteStatus,
