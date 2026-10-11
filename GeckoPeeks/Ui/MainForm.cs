@@ -4,6 +4,7 @@ using GeckoPeeks.App;
 using GeckoPeeks.Logging;
 using GeckoPeeks.Net;
 using GeckoPeeks.Routing;
+using GeckoPeeks.Text;
 
 namespace GeckoPeeks.Ui;
 
@@ -293,8 +294,9 @@ internal sealed class MainForm : Form
     private void ApplyStatus(ProbeSnapshot snapshot)
     {
         _modeValue.Text = snapshot.Mode;
-        _loggingValue.Text = snapshot.Paused ? "Paused" : "On";
-        _loggingValue.ForeColor = snapshot.Paused ? Theme.Amber : Theme.Leaf;
+        var (logging, loggingTone) = LogStatusText.LoggingChip(snapshot.Paused, snapshot.LogHealth);
+        _loggingValue.Text = logging;
+        _loggingValue.ForeColor = ToneColor(loggingTone);
         _leagueValue.Text = snapshot.LeagueRunning ? "Running" : "Not running";
         _leagueValue.ForeColor = snapshot.LeagueRunning ? Theme.Amber : Theme.Cream;
         _nextValue.Text = Countdown(snapshot);
@@ -311,29 +313,23 @@ internal sealed class MainForm : Form
             ? "\u2014"
             : Path.Combine(snapshot.LogFolder, snapshot.LogFileName);
 
-        // One status line: a write error beats a read problem beats the last write.
-        if (!string.IsNullOrWhiteSpace(snapshot.LogLastError))
-        {
-            _logStatusValue.Text = snapshot.LogLastError;
-            _logStatusValue.ForeColor = Theme.Coral;
-        }
-        else if (!string.IsNullOrWhiteSpace(snapshot.ReadProblem))
-        {
-            _logStatusValue.Text = snapshot.ReadProblem;
-            _logStatusValue.ForeColor = Theme.Amber;
-        }
-        else
-        {
-            var status = string.IsNullOrWhiteSpace(snapshot.LogWriteStatus)
-                ? "Waiting for first write"
-                : snapshot.LogWriteStatus;
-            _logStatusValue.Text = status;
-            _logStatusValue.ForeColor = status.StartsWith("Saved", StringComparison.Ordinal)
-                || status.StartsWith("Last saved", StringComparison.Ordinal)
-                ? Theme.Leaf
-                : Theme.Amber;
-        }
+        var (status, tone) = LogStatusText.StripLine(
+            snapshot.LogHealth,
+            snapshot.LogWriteStatus,
+            snapshot.ReadProblem,
+            snapshot.LogLocation,
+            snapshot.LogUnsavedRows);
+        _logStatusValue.Text = status;
+        _logStatusValue.ForeColor = ToneColor(tone);
     }
+
+    private static Color ToneColor(StatusTone tone) => tone switch
+    {
+        StatusTone.Good => Theme.Leaf,
+        StatusTone.Warn => Theme.Amber,
+        StatusTone.Bad => Theme.Coral,
+        _ => Theme.Cream,
+    };
 
     private void BindHops(ProbeSnapshot snapshot)
     {
