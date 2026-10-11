@@ -63,7 +63,7 @@ jobs:
           if ($env:GITHUB_REF_TYPE -eq "tag") {
             $tag = $env:GITHUB_REF_NAME
           }
-          elseif (-not [string]::IsNullOrWhiteSpace($env:INPUT_TAG)) {
+          elseif (-not [string.IsNullOrWhiteSpace($env:INPUT_TAG)) {
             $tag = $env:INPUT_TAG.Trim()
           }
           else {
@@ -78,7 +78,7 @@ jobs:
           }
 
           $notes = @"
-          Gecko Peeks $($tag.Substring(1)) — live hop RTT (Stopwatch + never show 0 ms for replies), summary Avg falls back LastHopAvg/HandoffRtt, in-window LOCAL LOG strip (path / Open log / Open folder / Copy path), visible v{Version} in the header.
+          Gecko Peeks $($tag.Substring(1)) — live hop RTT, summary Avg fallback, LOCAL LOG strip, Start with Windows checkmark, clearer monitor contrast/type/log table, visible v{Version}.
           "@
 
           gh release view $tag --json tagName 2>$null
