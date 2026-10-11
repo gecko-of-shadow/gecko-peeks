@@ -1,0 +1,64 @@
+name: Ship v1.0.9
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/ship-v109.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Materialize application icon
+        shell: pwsh
+        run: |
+          $ico = "GeckoPeeks/Assets/gecko-peeks.ico"
+          if (-not (Test-Path -LiteralPath $ico)) { certutil -decode "GeckoPeeks/Assets/gecko-peeks.ico.b64" $ico }
+      - name: Test
+        run: dotnet test -c Release
+      - name: Publish
+        working-directory: GeckoPeeks
+        run: dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
+      - name: Smoke-run GeckoPeeks.exe
+        shell: pwsh
+        run: ./.github/scripts/smoke-exe.ps1 -Exe "GeckoPeeks\bin\Release\net8.0-windows\win-x64\publish\GeckoPeeks.exe" -ExpectVersion "1.0.9" -OutDir smoke
+      - name: Upload smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-v1.0.9
+          path: smoke
+          if-no-files-found: warn
+      - name: Tag and release v1.0.9
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $exe = Join-Path (Get-Location) "GeckoPeeks\bin\Release\net8.0-windows\win-x64\publish\GeckoPeeks.exe"
+          if (-not (Test-Path -LiteralPath $exe)) { throw "Missing $exe" }
+          git config user.name "gecko-peeks-ci"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -f -a v1.0.9 -m "Gecko Peeks 1.0.9"
+          git push -f origin v1.0.9
+          $notes = "Gecko Peeks 1.0.9. When Controlled folder access (ransomware protection) blocks Documents\RiotRouteLog, the log moves to %LOCALAPPDATA%\GeckoPeeks\RiotRouteLog with the earlier rows copied, LOCAL LOG shows that path, and Open folder and Copy path follow it. The Documents copy is left as it was. A missing pending file is no longer shown as an error, the Logging chip says Blocked in coral only when no folder accepts writes, and a failed save no longer makes tests run back to back. Includes the 1.0.8 window changes. Exit the old tray app (right-click the gecko > Exit) before running the new GeckoPeeks.exe."
+          gh release view v1.0.9 --json tagName 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload v1.0.9 $exe --clobber
+            gh release edit v1.0.9 --draft=false --notes $notes
+          } else {
+            gh release create v1.0.9 $exe --title v1.0.9 --notes $notes --target main
+          }
