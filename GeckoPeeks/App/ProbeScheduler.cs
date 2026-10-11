@@ -333,7 +333,9 @@ public sealed class ProbeScheduler : IDisposable
         lock (_gate)
             league = _league;
 
-        var progress = new Progress<ProbeProgress>(update =>
+        // Progress<T> captures SynchronizationContext at construction. This runs on
+        // the thread pool, so use the UI context saved in Start() instead.
+        var progress = new ContextProgress<ProbeProgress>(_ui, update =>
         {
             lock (_gate)
             {
@@ -690,5 +692,42 @@ public sealed class ProbeScheduler : IDisposable
                 // A drawing failure must not kill the runner.
             }
         }, null);
+    }
+
+    /// <summary>
+    /// Like Progress&lt;T&gt;, but uses a captured UI SynchronizationContext even when
+    /// constructed on a thread-pool thread (where SynchronizationContext.Current is null).
+    /// </summary>
+    private sealed class ContextProgress<T> : IProgress<T>
+    {
+        private readonly SynchronizationContext? _context;
+        private readonly Action<T> _handler;
+
+        public ContextProgress(SynchronizationContext? context, Action<T> handler)
+        {
+            _context = context;
+            _handler = handler;
+        }
+
+        public void Report(T value)
+        {
+            if (_context == null)
+            {
+                _handler(value);
+                return;
+            }
+
+            _context.Post(_ =>
+            {
+                try
+                {
+                    _handler(value);
+                }
+                catch
+                {
+                    // Progress must not fail the probe.
+                }
+            }, null);
+        }
     }
 }
