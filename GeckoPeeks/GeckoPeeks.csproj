@@ -10,7 +10,7 @@
     <CopyOutputSymbolsToPublishDirectory>false</CopyOutputSymbolsToPublishDirectory>
     <AssemblyName>GeckoPeeks</AssemblyName>
     <RootNamespace>GeckoPeeks</RootNamespace>
-    <Version>1.0.11</Version>
+    <Version>1.0.12</Version>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
     <AssemblyTitle>Gecko Peeks</AssemblyTitle>
     <Product>Gecko Peeks</Product>

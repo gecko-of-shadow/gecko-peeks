@@ -25,6 +25,7 @@
     <Compile Include="..\GeckoPeeks\Text\TooltipText.cs" Link="Text\TooltipText.cs" />
     <Compile Include="..\GeckoPeeks\Text\TrayMenu.cs" Link="Text\TrayMenu.cs" />
     <Compile Include="..\GeckoPeeks\App\StartupRegistration.cs" Link="App\StartupRegistration.cs" />
+    <Compile Include="..\GeckoPeeks\App\AppUpdate.cs" Link="App\AppUpdate.cs" />
     <Compile Include="..\GeckoPeeks\Text\LogStatusText.cs" Link="Text\LogStatusText.cs" />
     <Compile Include="..\GeckoPeeks\App\LogPaths.cs" Link="App\LogPaths.cs" />
     <Compile Include="..\GeckoPeeks\Logging\ActivityLog.cs" Link="Logging\ActivityLog.cs" />
