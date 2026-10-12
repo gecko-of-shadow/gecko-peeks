@@ -8,6 +8,7 @@ public enum TrayCommand
     OpenLogFolder,
     TogglePause,
     StartWithWindows,
+    CheckForUpdates,
     Exit,
 }
 
@@ -34,10 +35,16 @@ public static class TrayMenu
         TrayCommand.TogglePause,
         TrayCommand.StartWithWindows,
         null,
+        TrayCommand.CheckForUpdates,
+        null,
         TrayCommand.Exit,
     };
 
-    public static string Label(TrayCommand command, bool paused = false) => command switch
+    /// <param name="updateVersion">
+    /// When set, the updates item reads "Install update (v…)" so one click finishes a download
+    /// that already finished in the background.
+    /// </param>
+    public static string Label(TrayCommand command, bool paused = false, string? updateVersion = null) => command switch
     {
         TrayCommand.OpenWindow => "Open window",
         TrayCommand.RunTestNow => "Run test now",
@@ -45,6 +52,9 @@ public static class TrayMenu
         TrayCommand.OpenLogFolder => "Open log folder",
         TrayCommand.TogglePause => paused ? "Resume logging" : "Pause logging",
         TrayCommand.StartWithWindows => "Start with Windows",
+        TrayCommand.CheckForUpdates => string.IsNullOrWhiteSpace(updateVersion)
+            ? "Check for updates"
+            : "Install update (v" + updateVersion + ")",
         TrayCommand.Exit => "Exit",
         _ => throw new ArgumentOutOfRangeException(nameof(command), command, null),
     };
