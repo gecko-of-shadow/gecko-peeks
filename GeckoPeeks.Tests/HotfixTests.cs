@@ -32,6 +32,17 @@ public class TrayMenuTests
     }
 
     [Fact]
+    public void Check_for_updates_sits_above_Exit_with_separators()
+    {
+        Assert.Equal(TrayCommand.CheckForUpdates, TrayMenu.Layout[^3]);
+        Assert.Null(TrayMenu.Layout[^4]);
+        Assert.Equal("Check for updates", TrayMenu.Label(TrayCommand.CheckForUpdates));
+        Assert.Equal(
+            "Install update (v1.0.12)",
+            TrayMenu.Label(TrayCommand.CheckForUpdates, updateVersion: "1.0.12"));
+    }
+
+    [Fact]
     public void Open_window_stands_apart_from_the_logging_commands()
     {
         Assert.Null(TrayMenu.Layout[1]);
