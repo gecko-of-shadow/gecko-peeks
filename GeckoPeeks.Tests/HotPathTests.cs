@@ -250,7 +250,7 @@ public class LatencyLabelTests
     {
         Assert.Equal("Riot 61 ms", LatencyLabels.Tooltip("61", "21", "40"));
         Assert.Equal("last hop 21 ms", LatencyLabels.Tooltip("", "20.6", "40"));
-        Assert.Equal("handoff 40 ms", LatencyLabels.Tooltip("", "", ""));
+        Assert.Equal("handoff 40 ms", LatencyLabels.Tooltip("", "", "40"));
         Assert.Equal("n/a", LatencyLabels.Tooltip("", "", ""));
     }
 }
