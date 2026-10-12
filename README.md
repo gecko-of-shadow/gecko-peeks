@@ -8,11 +8,15 @@ Windows 11 tray app that traceroutes to Riot (`192.207.0.5`) and appends each re
 - Or right-click the gecko and choose **Open window** (bold, first item).
 - Or launch `GeckoPeeks.exe` again (Start menu, taskbar pin): the running copy brings its window forward instead of starting a second monitor.
 
-The tray menu: **Open window**, Run test now, Open log, Open log folder, Pause/Resume logging, Start with Windows (cream checkmark when on), Exit.
+The tray menu: **Open window**, Run test now, Open log, Open log folder, Pause/Resume logging, Start with Windows (cream checkmark when on), Check for updates / Install update, Exit.
+
+## Updates
+
+A few seconds after launch the app asks GitHub for the latest release. When a newer `GeckoPeeks.exe` is up, it downloads in the background and the tray item becomes **Install update (v…)**. One click swaps the file and restarts with the same arguments (including `--tray` when Start with Windows launched it). **Check for updates** does the same check on demand; Cancel on the prompt skips that version so it does not nag again. Needs network access to `api.github.com` and `github.com` (or `objects.githubusercontent.com` for the asset).
 
 ## Window
 
-The window scales with the display: at 125% or 150% every box grows with its text, so chip captions, buttons and hints are drawn whole. The traceroute's **Hostname** column and the summary's **Upstream** column take the width the other columns leave over, so the grids run up to their scrollbars. A divider between the traceroute and the recent log can be dragged to give either more room; it keeps its ratio when the window resizes. Replacing an older build: exit the old tray app first (right-click the gecko > **Exit**), then run the new exe, and check the title bar shows the new version.
+The window scales with the display: at 125% or 150% every box grows with its text, so chip captions, buttons and hints are drawn whole. The traceroute's **Hostname** column and the summary's **Upstream** column take the width the other columns leave over, so the grids run up to their scrollbars. A divider between the traceroute and the recent log can be dragged to give either more room; it keeps its ratio when the window resizes. Replacing an older build by hand: exit the old tray app first (right-click the gecko > **Exit**), then run the new exe, and check the title bar shows the new version. From v1.0.12 on, prefer **Install update** in the tray instead.
 
 ## Build
 
