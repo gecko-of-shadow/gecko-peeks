@@ -34,6 +34,27 @@ public sealed class ProbeSnapshot
     /// <summary>Why the log is in AppData instead of Documents, else empty.</summary>
     public string LogLocation { get; init; } = "";
     public int LogUnsavedRows { get; init; }
+
+    public bool HasRoute { get; init; }
+    public string RouteLine { get; init; } = "No route yet";
+    public string LastHopFigure { get; init; } = "\u2014";
+    public string RiotFigure { get; init; } = "\u2014";
+    public string ContextLine { get; init; } = "";
+    public string ChangeLine { get; init; } = "";
+    public IReadOnlyList<int> ChangedHops { get; init; } = Array.Empty<int>();
+    public string TestTimestamp { get; init; } = "";
+    public string TestUpstream { get; init; } = "";
+    public string TestHandoffNetwork { get; init; } = "";
+    public string TestHandoffCity { get; init; } = "";
+    public string TestLastHopAvg { get; init; } = "";
+    public string TestLastHopLoss { get; init; } = "";
+    public string TestRiotAvg { get; init; } = "";
+    public string TestRiotLoss { get; init; } = "";
+    public string TestLeague { get; init; } = "";
+    public string TestAdapter { get; init; } = "";
+    public string TestWifi { get; init; } = "";
+    public string TestGateway { get; init; } = "";
+    public string TestVpn { get; init; } = "";
 }
 
 /// <summary>
@@ -74,6 +95,17 @@ public sealed class ProbeScheduler : IDisposable
     private string _tipRiot = "";
     private string _tipLastHop = "";
     private string _tipHandoffRtt = "";
+    private string _tipLastLoss = "";
+    private string _tipRiotLoss = "";
+    private string _tipLeague = "";
+    private string _tipAdapter = "";
+    private string _tipWifi = "";
+    private string _tipGateway = "";
+    private string _tipVpn = "";
+    private string _prevFullPath = "";
+    private string _pathChange = "";
+    private string _pendingHopNote = "";
+    private List<int> _changedHops = new();
     private string _logWriteStatus = LogStatusText.Waiting(null);
     private string _activityFolder;
     private DateTime? _tipTimestamp;
@@ -485,6 +517,16 @@ public sealed class ProbeScheduler : IDisposable
             lock (_gate)
                 _phase = "Last test problem: " + row.Error;
         }
+
+        string hopNote;
+        lock (_gate)
+        {
+            hopNote = _pendingHopNote;
+            _pendingHopNote = "";
+        }
+
+        if (hopNote.Length > 0)
+            Note(hopNote);
     }
 
     /// <summary>
@@ -508,17 +550,32 @@ public sealed class ProbeScheduler : IDisposable
         var prevUp = _prevUpstream;
         var prevCity = _prevCity;
         var prevNet = _prevNetwork;
+        var prevPath = _prevFullPath;
 
         _hasPrevious = true;
         _prevUpstream = row.Upstream;
         _prevCity = row.HandoffCity;
         _prevNetwork = row.HandoffNetwork;
+        _prevFullPath = row.FullPath;
         _tipUpstream = row.Upstream;
         _tipNetwork = row.HandoffNetwork;
         _tipCity = row.HandoffCity;
         _tipRiot = row.RiotHopAvg;
         _tipLastHop = row.LastHopAvg;
         _tipHandoffRtt = row.HandoffRttMs;
+        CopyTestFields(row);
+        if (had && !string.IsNullOrWhiteSpace(prevPath))
+        {
+            _pathChange = HopDiff.Describe(prevPath, row.FullPath);
+            _changedHops = HopDiff.ChangedHopNumbers(prevPath, row.FullPath).ToList();
+            _pendingHopNote = _changedHops.Count > 0 ? _pathChange : "";
+        }
+        else
+        {
+            _pathChange = "";
+            _changedHops = new List<int>();
+            _pendingHopNote = "";
+        }
         if (DateTime.TryParseExact(
                 row.Timestamp,
                 "yyyy-MM-dd HH:mm:ss",
@@ -618,6 +675,8 @@ public sealed class ProbeScheduler : IDisposable
         _tipRiot = last.RiotHopAvg;
         _tipLastHop = last.LastHopAvg;
         _tipHandoffRtt = last.HandoffRttMs;
+        _prevFullPath = last.FullPath;
+        CopyTestFields(last);
         if (DateTime.TryParseExact(
                 last.Timestamp,
                 "yyyy-MM-dd HH:mm:ss",
@@ -659,6 +718,7 @@ public sealed class ProbeScheduler : IDisposable
         _tipRiot = last.RiotHopAvg;
         _tipLastHop = last.LastHopAvg;
         _tipHandoffRtt = last.HandoffRttMs;
+        _prevFullPath = last.FullPath;
         if (DateTime.TryParseExact(
                 last.Timestamp,
                 "yyyy-MM-dd HH:mm:ss",
@@ -672,6 +732,17 @@ public sealed class ProbeScheduler : IDisposable
 
         _hops = settings.Hops.Select(ToHop).ToList();
         _hopsRevision++;
+    }
+
+    private void CopyTestFields(RouteRow row)
+    {
+        _tipLastLoss = row.LastHopLossPct;
+        _tipRiotLoss = row.RiotHopLossPct;
+        _tipLeague = row.LeagueRunning;
+        _tipAdapter = row.Adapter;
+        _tipWifi = row.Wifi;
+        _tipGateway = row.Gateway;
+        _tipVpn = row.Vpn;
     }
 
     private static HopObservation ToHop(SavedHop hop) =>
@@ -797,6 +868,34 @@ public sealed class ProbeScheduler : IDisposable
             LogHealth = _csv.Health,
             LogLocation = LogStatusText.Location(_csv.UsingFallback, _csv.MovedThisSession, _csv.CopiedRows),
             LogUnsavedRows = _csv.UnsavedRows,
+            HasRoute = _tipTimestamp != null,
+            RouteLine = _tipTimestamp == null
+                ? "No route yet"
+                : RouteCardText.RouteLine(_tipUpstream, _tipNetwork, _tipCity),
+            LastHopFigure = _tipTimestamp == null
+                ? "\u2014"
+                : RouteCardText.LastHopFigure(_tipLastHop, _tipLastLoss),
+            RiotFigure = _tipTimestamp == null
+                ? "\u2014"
+                : RouteCardText.RiotFigure(_tipRiot, _tipRiotLoss),
+            ContextLine = _tipTimestamp == null
+                ? "The first test fills this in."
+                : RouteCardText.Context(_league, _tipAdapter, _tipWifi, _tipGateway, _tipVpn, TooltipText.Ago(_tipTimestamp.Value, now)),
+            ChangeLine = _pathChange,
+            ChangedHops = _changedHops.ToArray(),
+            TestTimestamp = _tipTimestamp == null ? "" : CsvFormat.FormatTimestamp(_tipTimestamp.Value),
+            TestUpstream = _tipUpstream,
+            TestHandoffNetwork = _tipNetwork,
+            TestHandoffCity = _tipCity,
+            TestLastHopAvg = _tipLastHop,
+            TestLastHopLoss = _tipLastLoss,
+            TestRiotAvg = _tipRiot,
+            TestRiotLoss = _tipRiotLoss,
+            TestLeague = _tipLeague,
+            TestAdapter = _tipAdapter,
+            TestWifi = _tipWifi,
+            TestGateway = _tipGateway,
+            TestVpn = _tipVpn,
         };
     }
 

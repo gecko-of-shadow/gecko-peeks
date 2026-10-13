@@ -25,6 +25,10 @@ public sealed class RouteRow
     public string RiotHopAvg { get; set; } = "";
     public string RiotHopLossPct { get; set; } = "";
     public string FullPath { get; set; } = "";
+    public string Adapter { get; set; } = "";
+    public string Wifi { get; set; } = "";
+    public string Gateway { get; set; } = "";
+    public string Vpn { get; set; } = "";
 
     public string Error { get; set; } = "";
     public bool Cancelled { get; set; }

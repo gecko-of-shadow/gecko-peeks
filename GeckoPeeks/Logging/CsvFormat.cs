@@ -26,7 +26,18 @@ public static class CsvFormat
         "RiotHopAvg",
         "RiotHopLossPct",
         "FullPath",
+        "Adapter",
+        "Wifi",
+        "Gateway",
+        "Vpn",
     };
+
+    /// <summary>
+    /// Header written by v1.0.12 and earlier. A main file that still starts with this line
+    /// is widened in place; the old rows stay short and parse as blank network fields.
+    /// </summary>
+    public const string LegacyHeaderLine =
+        "Timestamp,LeagueRunning,Upstream,HandoffNetwork,HandoffHost,HandoffIP,HandoffCity,HandoffRttMs,LastHopIP,LastHopHost,LastHopMin,LastHopAvg,LastHopMax,LastHopLossPct,RiotHopAvg,RiotHopLossPct,FullPath\r\n";
 
     public static string HeaderLine => string.Join(",", Columns) + "\r\n";
 
@@ -70,6 +81,10 @@ public static class CsvFormat
             row.RiotHopAvg,
             row.RiotHopLossPct,
             row.FullPath,
+            row.Adapter,
+            row.Wifi,
+            row.Gateway,
+            row.Vpn,
         };
 
         var builder = new StringBuilder();
@@ -118,6 +133,10 @@ public static class CsvFormat
                 RiotHopAvg = Field(fields, 14),
                 RiotHopLossPct = Field(fields, 15),
                 FullPath = Field(fields, 16),
+                Adapter = Field(fields, 17),
+                Wifi = Field(fields, 18),
+                Gateway = Field(fields, 19),
+                Vpn = Field(fields, 20),
             });
         }
 

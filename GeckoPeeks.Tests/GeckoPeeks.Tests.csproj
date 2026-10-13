@@ -27,6 +27,10 @@
     <Compile Include="..\GeckoPeeks\App\StartupRegistration.cs" Link="App\StartupRegistration.cs" />
     <Compile Include="..\GeckoPeeks\App\AppUpdate.cs" Link="App\AppUpdate.cs" />
     <Compile Include="..\GeckoPeeks\Text\LogStatusText.cs" Link="Text\LogStatusText.cs" />
+    <Compile Include="..\GeckoPeeks\Text\HopDiff.cs" Link="Text\HopDiff.cs" />
+    <Compile Include="..\GeckoPeeks\Text\RouteCardText.cs" Link="Text\RouteCardText.cs" />
+    <Compile Include="..\GeckoPeeks\Text\DiagnosisText.cs" Link="Text\DiagnosisText.cs" />
+    <Compile Include="..\GeckoPeeks\Net\NetworkContext.cs" Link="Net\NetworkContext.cs" />
     <Compile Include="..\GeckoPeeks\App\LogPaths.cs" Link="App\LogPaths.cs" />
     <Compile Include="..\GeckoPeeks\Logging\ActivityLog.cs" Link="Logging\ActivityLog.cs" />
   </ItemGroup>

@@ -8,7 +8,7 @@ Windows 11 tray app that traceroutes to Riot (`192.207.0.5`) and appends each re
 - Or right-click the gecko and choose **Open window** (bold, first item).
 - Or launch `GeckoPeeks.exe` again (Start menu, taskbar pin): the running copy brings its window forward instead of starting a second monitor.
 
-The tray menu: **Open window**, Run test now, Open log, Open log folder, Pause/Resume logging, Start with Windows (cream checkmark when on), Check for updates / Install update, Exit.
+The tray menu: **Open window**, Run test now, Copy diagnosis, Open log, Open log folder, Pause/Resume logging, Start with Windows (cream checkmark when on), Check for updates / Install update, Exit. **Copy diagnosis** puts a short plain-text report on the clipboard (route, last hop, Riot ICMP, League, adapter, and the hop list).
 
 ## Updates
 
@@ -16,7 +16,9 @@ A few seconds after launch the app asks GitHub for the latest release. When a ne
 
 ## Window
 
-The window scales with the display: at 125% or 150% every box grows with its text, so chip captions, buttons and hints are drawn whole. The traceroute's **Hostname** column and the summary's **Upstream** column take the width the other columns leave over, so the grids run up to their scrollbars. A divider between the traceroute and the recent log can be dragged to give either more room; it keeps its ratio when the window resizes. Replacing an older build by hand: exit the old tray app first (right-click the gecko > **Exit**), then run the new exe, and check the title bar shows the new version. From v1.0.12 on, prefer **Install update** in the tray instead.
+The window leads with the route: upstream, handoff, and city on one line, then **Last hop** and **Riot ICMP** as two separate figures. Under that, one line names League, the adapter (and Wi-Fi name, when there is one), a VPN when the default route is a tunnel, and how long ago the test ran. A hop whose address changed since the previous test is marked in the traceroute and called out on its own line (`Hop 8 changed`). **Copy diagnosis** and **Run test now** sit on the card. The same copy command is on the tray menu.
+
+Below the card: the Logging chip, the next test, and the phase. Then the latest traceroute beside the upstream summary, then a short **Recent tests** list (time, route, last hop, Riot ICMP, League, network). The full CSV stays behind **Open log**. The window scales with the display: at 125% or 150% every box grows with its text, so chip captions, buttons and hints are drawn whole. The traceroute's **Hostname** column and the summary's **Upstream** column take the width the other columns leave over, so the grids run up to their scrollbars. Replacing an older build by hand: exit the old tray app first (right-click the gecko > **Exit**), then run the new exe, and check the title bar shows the new version. From v1.0.12 on, prefer **Install update** in the tray instead.
 
 ## Build
 
@@ -71,7 +73,7 @@ Each test pings two addresses ten times:
 - **Last hop ms** (`LastHopAvg`) is the average ping to the last router that answered the traceroute. It is path latency, not in-game ping.
 - **Riot ICMP** (`RiotHopAvg`) is the average ping to `104.160.141.51`. Riot drops ping on many paths. When every ping is lost, the window shows **no reply** (the CSV keeps `RiotHopAvg` blank and `RiotHopLossPct` at 100), and the series stops after 3 unanswered pings so the row is written sooner.
 
-The upstream summary shows both columns side by side and never fills one from the other. The CSV column names are unchanged.
+The upstream summary shows both columns side by side and never fills one from the other. Those CSV column names are unchanged. v1.0.13 appends `Adapter`, `Wifi`, `Gateway`, and `Vpn` after `FullPath`. An older log keeps its rows; the header is widened on the next save, and the older rows leave the new fields blank. `Vpn` is `Y` when the default-route adapter is a known tunnel (WireGuard, NordLynx, Tailscale, OpenVPN, and the like). A hop-only path change is written to `activity.log` and shown on the card. A balloon still fires only when the upstream or the handoff city changes.
 
 ## Start with Windows
 

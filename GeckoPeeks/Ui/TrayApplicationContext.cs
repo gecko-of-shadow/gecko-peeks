@@ -143,6 +143,9 @@ internal sealed class TrayApplicationContext : ApplicationContext
             case TrayCommand.RunTestNow:
                 _scheduler.RunNow();
                 break;
+            case TrayCommand.CopyDiagnosis:
+                _form.CopyDiagnosis();
+                break;
             case TrayCommand.OpenLog:
                 _form.OpenLog();
                 break;

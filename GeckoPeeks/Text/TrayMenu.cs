@@ -4,6 +4,7 @@ public enum TrayCommand
 {
     OpenWindow,
     RunTestNow,
+    CopyDiagnosis,
     OpenLog,
     OpenLogFolder,
     TogglePause,
@@ -30,6 +31,7 @@ public static class TrayMenu
         TrayCommand.OpenWindow,
         null,
         TrayCommand.RunTestNow,
+        TrayCommand.CopyDiagnosis,
         TrayCommand.OpenLog,
         TrayCommand.OpenLogFolder,
         TrayCommand.TogglePause,
@@ -48,6 +50,7 @@ public static class TrayMenu
     {
         TrayCommand.OpenWindow => "Open window",
         TrayCommand.RunTestNow => "Run test now",
+        TrayCommand.CopyDiagnosis => "Copy diagnosis",
         TrayCommand.OpenLog => "Open log",
         TrayCommand.OpenLogFolder => "Open log folder",
         TrayCommand.TogglePause => paused ? "Resume logging" : "Pause logging",

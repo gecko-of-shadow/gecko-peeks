@@ -42,6 +42,11 @@ public static class TestRunner
 
         try
         {
+            var net = NetworkContext.Capture();
+            row.Adapter = net.Adapter;
+            row.Wifi = net.Wifi;
+            row.Gateway = net.Gateway;
+            row.Vpn = net.Vpn;
             await ExecuteAsync(row, progress, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)

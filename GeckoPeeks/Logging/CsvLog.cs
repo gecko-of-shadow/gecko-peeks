@@ -295,6 +295,8 @@ public sealed class CsvLog
         MergePending(folder, stream);
         if (stream.Length == 0)
             WriteFull(stream, Header());
+        else
+            WidenHeader(stream);
         WriteFull(stream, _utf8.GetBytes(payload));
         RefreshBackup(folder, stream);
     }
@@ -519,6 +521,99 @@ public sealed class CsvLog
 
             BackupProblem = ex.Message;
         }
+    }
+
+    /// <summary>
+    /// Replaces a v1.0.12 header with the current one. The body is not rewritten row by row,
+    /// so older lines keep their original columns. A failure puts the previous bytes back.
+    /// </summary>
+    private void WidenHeader(FileStream stream)
+    {
+        const int maxBytes = 32 * 1024 * 1024;
+        if (stream.Length <= 0 || stream.Length > maxBytes)
+        {
+            stream.Seek(0, SeekOrigin.End);
+            return;
+        }
+
+        // Every save used to read the whole log to notice a header that was already current.
+        // Compare the opening bytes first. The body is read only when this file still has the
+        // v1.0.12 header, which happens once.
+        var legacy = _utf8.GetBytes(CsvFormat.LegacyHeaderLine);
+        var prefixCount = (int)Math.Min(stream.Length, legacy.Length + 3);
+        var prefix = new byte[prefixCount];
+        stream.Position = 0;
+        if (ReadExact(stream, prefix) != prefixCount || !StartsWithLegacyHeader(prefix, legacy))
+        {
+            stream.Seek(0, SeekOrigin.End);
+            return;
+        }
+
+        var count = (int)stream.Length;
+        var existing = new byte[count];
+        stream.Position = 0;
+        if (ReadExact(stream, existing) != count)
+        {
+            stream.Seek(0, SeekOrigin.End);
+            return;
+        }
+
+        var text = _utf8.GetString(existing);
+        if (text.Length > 0 && text[0] == '\uFEFF')
+            text = text[1..];
+        if (!text.StartsWith(CsvFormat.LegacyHeaderLine, StringComparison.Ordinal))
+        {
+            stream.Seek(0, SeekOrigin.End);
+            return;
+        }
+
+        var body = text[CsvFormat.LegacyHeaderLine.Length..];
+        var rewritten = Header().Concat(_utf8.GetBytes(body)).ToArray();
+        try
+        {
+            stream.SetLength(0);
+            stream.Write(rewritten, 0, rewritten.Length);
+            stream.Flush(true);
+        }
+        catch
+        {
+            try
+            {
+                stream.SetLength(0);
+                stream.Write(existing, 0, existing.Length);
+                stream.Flush(true);
+            }
+            catch
+            {
+                // The temp copy in memory is the previous complete file. A second failure
+                // leaves whatever the disk still has.
+            }
+
+            throw;
+        }
+    }
+
+    private static int ReadExact(Stream stream, byte[] buffer)
+    {
+        var read = 0;
+        while (read < buffer.Length)
+        {
+            var n = stream.Read(buffer, read, buffer.Length - read);
+            if (n == 0)
+                break;
+            read += n;
+        }
+
+        return read;
+    }
+
+    /// <summary>True when the file still starts with the 17-column header, with or without a BOM.</summary>
+    private static bool StartsWithLegacyHeader(byte[] prefix, byte[] legacy)
+    {
+        var offset = prefix.Length >= 3 && prefix[0] == 0xEF && prefix[1] == 0xBB && prefix[2] == 0xBF ? 3 : 0;
+        if (prefix.Length - offset < legacy.Length)
+            return false;
+        return prefix.AsSpan(offset, legacy.Length).SequenceEqual(legacy);
     }
 
     private byte[] Header() =>

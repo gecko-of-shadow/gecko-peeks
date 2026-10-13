@@ -47,6 +47,8 @@ public class TrayMenuTests
     {
         Assert.Null(TrayMenu.Layout[1]);
         Assert.Equal(TrayCommand.RunTestNow, TrayMenu.Layout[2]);
+        Assert.Equal(TrayCommand.CopyDiagnosis, TrayMenu.Layout[3]);
+        Assert.Equal("Copy diagnosis", TrayMenu.Label(TrayCommand.CopyDiagnosis));
     }
 
     [Fact]

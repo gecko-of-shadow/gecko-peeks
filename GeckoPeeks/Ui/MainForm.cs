@@ -12,23 +12,25 @@ internal sealed class MainForm : Form
 {
     private readonly ProbeScheduler _scheduler;
     private readonly DataGridView _hopsGrid;
-    private readonly DataGridView _logGrid;
+    private readonly DataGridView _historyGrid;
     private readonly DataGridView _summaryGrid;
     private readonly Label _hopsEmpty;
-    private readonly Label _logEmpty;
+    private readonly Label _historyEmpty;
     private readonly Label _summaryEmpty;
     private readonly Label _summaryHint;
-    private readonly Label _modeValue;
     private readonly Label _loggingValue;
-    private readonly Label _leagueValue;
     private readonly Label _nextValue;
     private readonly Label _phaseValue;
-    private readonly Label _activityValue;
+    private readonly Label _routeValue;
+    private readonly Label _lastHopValue;
+    private readonly Label _riotValue;
+    private readonly Label _contextValue;
+    private readonly Label _changeValue;
+    private readonly Label _copyNote;
     private readonly Label _hopsHint;
     private readonly Label _logPathValue;
     private readonly Label _logStatusValue;
     private readonly System.Windows.Forms.Timer _clock;
-    private readonly SplitContainer _split;
     private bool _exitRequested;
     private int _hopsRevision = -1;
     private int _logRevision = -1;
@@ -58,20 +60,22 @@ internal sealed class MainForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 4,
+            RowCount = 6,
             BackColor = Theme.Jungle,
             Padding = new Padding(12, 8, 12, 8),
         };
-        // Compact chrome up top so traceroute + recent log own the window. The status panel and
-        // the LOCAL LOG strip size themselves from their fonts, so nothing in them is clipped.
+        // The route card leads. Status and LOCAL LOG size themselves from their fonts.
+        // Traceroute and recent tests share the leftover height.
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 68));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 68));
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 32));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
         root.Controls.Add(BuildHeader(version), 0, 0);
-        root.Controls.Add(BuildStatus(out _modeValue, out _loggingValue, out _leagueValue, out _nextValue, out _phaseValue, out _activityValue), 0, 1);
-        root.Controls.Add(BuildLogStrip(out _logPathValue, out _logStatusValue), 0, 2);
+        root.Controls.Add(BuildRouteCard(out _routeValue, out _lastHopValue, out _riotValue, out _contextValue, out _changeValue, out _copyNote), 0, 1);
+        root.Controls.Add(BuildStatus(out _loggingValue, out _nextValue, out _phaseValue), 0, 2);
 
         _hopsGrid = MakeGrid();
         _hopsGrid.Columns.Add("Hop", "#");
@@ -120,29 +124,21 @@ internal sealed class MainForm : Form
         body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 38));
         body.Controls.Add(Section("Latest traceroute", Wrap(_hopsGrid, _hopsEmpty, _hopsHint)), 0, 0);
         body.Controls.Add(Section("Upstream summary", Wrap(_summaryGrid, _summaryEmpty, _summaryHint)), 1, 0);
+        root.Controls.Add(body, 0, 3);
 
-        _logGrid = MakeGrid();
-        _logGrid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
-        foreach (var column in CsvFormat.Columns)
-            _logGrid.Columns.Add(column, LatencyLabels.ColumnHeader(column));
-        ConfigureLogColumns(_logGrid);
-        _logEmpty = EmptyLabel("No rows yet. A finished test appends the first line to the log.");
-
-        // Traceroute above, recent log below, with a divider the user can drag.
-        _split = new SplitContainer
-        {
-            Dock = DockStyle.Fill,
-            Orientation = Orientation.Horizontal,
-            BackColor = Theme.Jungle,
-            SplitterWidth = 6,
-            TabStop = false,
-            Margin = new Padding(0, 4, 0, 0),
-        };
-        // Keeps the log's right edge level with the Upstream summary, which has the same margin.
-        _split.Panel2.Padding = new Padding(0, 0, 8, 0);
-        _split.Panel1.Controls.Add(body);
-        _split.Panel2.Controls.Add(Section("Recent log (last 50)", Wrap(_logGrid, _logEmpty, null)));
-        root.Controls.Add(_split, 0, 3);
+        _historyGrid = MakeGrid();
+        _historyGrid.Columns.Add("Time", "Time");
+        _historyGrid.Columns.Add("Route", "Route");
+        _historyGrid.Columns.Add("LastHop", "Last hop");
+        _historyGrid.Columns.Add("Riot", "Riot ICMP");
+        _historyGrid.Columns.Add("League", "League");
+        _historyGrid.Columns.Add("Network", "Network");
+        StyleNumberColumn(_historyGrid.Columns["LastHop"]);
+        StyleNumberColumn(_historyGrid.Columns["Riot"]);
+        FillColumn(_historyGrid.Columns["Route"], 140);
+        _historyEmpty = EmptyLabel("No rows yet. A finished test appends the first line to the log.");
+        root.Controls.Add(Section("Recent tests", Wrap(_historyGrid, _historyEmpty, null)), 0, 4);
+        root.Controls.Add(BuildLogStrip(out _logPathValue, out _logStatusValue), 0, 5);
 
         Controls.Add(root);
         AutoScaleDimensions = new SizeF(96f, 96f);
@@ -150,7 +146,6 @@ internal sealed class MainForm : Form
         ResumeLayout(false);
         PerformLayout();
         ApplyGridMetrics();
-        PlaceSplitter();
 
         _scheduler.Updated += OnUpdated;
         _clock = new System.Windows.Forms.Timer { Interval = 1000 };
@@ -181,7 +176,7 @@ internal sealed class MainForm : Form
         TopMost = true;
         TopMost = false;
         Activate();
-        BindLog();
+        BindHistory();
     }
 
     public void ExitApplication()
@@ -238,6 +233,45 @@ internal sealed class MainForm : Form
         }
     }
 
+    public void CopyDiagnosis()
+    {
+        var snapshot = _scheduler.Capture();
+        var hops = new List<DiagnosisHop>(snapshot.Hops.Count);
+        foreach (var hop in snapshot.Hops)
+            hops.Add(new DiagnosisHop(hop.Number, hop.Responded ? hop.Ip : "*", hop.Hostname));
+
+        var text = DiagnosisText.Format(new DiagnosisInput(
+            VersionNumber(),
+            snapshot.HasRoute,
+            snapshot.TestTimestamp,
+            snapshot.TestUpstream,
+            snapshot.TestHandoffNetwork,
+            snapshot.TestHandoffCity,
+            snapshot.TestLastHopAvg,
+            snapshot.TestLastHopLoss,
+            snapshot.TestRiotAvg,
+            snapshot.TestRiotLoss,
+            snapshot.TestLeague,
+            snapshot.TestAdapter,
+            snapshot.TestWifi,
+            snapshot.TestGateway,
+            snapshot.TestVpn,
+            snapshot.ChangeLine,
+            hops));
+
+        try
+        {
+            Clipboard.SetText(text);
+            _copyNote.Text = "Copied.";
+            _copyNote.ForeColor = Theme.Leaf;
+        }
+        catch
+        {
+            _copyNote.Text = "Could not copy.";
+            _copyNote.ForeColor = Theme.Coral;
+        }
+    }
+
     protected override void OnShown(EventArgs e)
     {
         base.OnShown(e);
@@ -266,31 +300,13 @@ internal sealed class MainForm : Form
     {
         var rowHeight = LogicalToDeviceUnits(LineHeight(Theme.Body) + 7);
         var headerHeight = LogicalToDeviceUnits(LineHeight(Theme.Body) + 11);
-        foreach (var grid in new[] { _hopsGrid, _summaryGrid, _logGrid })
+        foreach (var grid in new[] { _hopsGrid, _summaryGrid, _historyGrid })
         {
             grid.ColumnHeadersHeight = headerHeight;
             grid.RowTemplate.Height = rowHeight;
             foreach (DataGridViewRow row in grid.Rows)
                 row.Height = rowHeight;
         }
-    }
-
-    /// <summary>
-    /// The traceroute starts with the larger share; the divider stays draggable and keeps its
-    /// ratio when the window resizes. Needs the container's real height, because the panel
-    /// minimums are checked against it.
-    /// </summary>
-    private void PlaceSplitter()
-    {
-        var minHops = LogicalToDeviceUnits(140);
-        var minLog = LogicalToDeviceUnits(120);
-        var usable = _split.Height - _split.SplitterWidth;
-        if (usable <= minHops + minLog)
-            return;
-
-        _split.Panel1MinSize = minHops;
-        _split.Panel2MinSize = minLog;
-        _split.SplitterDistance = Math.Clamp((int)(usable * 0.58), minHops, usable - minLog);
     }
 
     /// <summary>
@@ -341,6 +357,7 @@ internal sealed class MainForm : Form
         }
 
         ApplyStatus(snapshot);
+        ApplyRouteCard(snapshot);
         ApplyLogStrip(snapshot);
         if (snapshot.HopsRevision != _hopsRevision)
         {
@@ -353,7 +370,7 @@ internal sealed class MainForm : Form
             _logRevision = snapshot.LogRevision;
             // Skip full CSV parse while hidden; refresh when the window is shown.
             if (Visible)
-                BindLog();
+                BindHistory();
         }
     }
 
@@ -371,18 +388,24 @@ internal sealed class MainForm : Form
 
     private void ApplyStatus(ProbeSnapshot snapshot)
     {
-        _modeValue.Text = snapshot.Mode;
         var (logging, loggingTone) = LogStatusText.LoggingChip(snapshot.Paused, snapshot.LogHealth);
         _loggingValue.Text = logging;
         _loggingValue.ForeColor = ToneColor(loggingTone);
-        _leagueValue.Text = snapshot.LeagueRunning ? "Running" : "Not running";
-        _leagueValue.ForeColor = snapshot.LeagueRunning ? Theme.Amber : Theme.Cream;
         _nextValue.Text = Countdown(snapshot);
         _phaseValue.Text = string.IsNullOrWhiteSpace(snapshot.Phase) ? "Idle" : snapshot.Phase;
         _phaseValue.ForeColor = PhaseColor(snapshot);
-        _activityValue.Text = string.IsNullOrWhiteSpace(snapshot.ActivityLine)
-            ? "No activity yet."
-            : snapshot.ActivityLine;
+    }
+
+    private void ApplyRouteCard(ProbeSnapshot snapshot)
+    {
+        _routeValue.Text = string.IsNullOrWhiteSpace(snapshot.RouteLine) ? "No route yet" : snapshot.RouteLine;
+        _lastHopValue.Text = string.IsNullOrWhiteSpace(snapshot.LastHopFigure) ? "\u2014" : snapshot.LastHopFigure;
+        _lastHopValue.ForeColor = snapshot.LastHopFigure == LatencyLabels.NoReply ? Theme.CreamMuted : Theme.Cream;
+        _riotValue.Text = string.IsNullOrWhiteSpace(snapshot.RiotFigure) ? "\u2014" : snapshot.RiotFigure;
+        _riotValue.ForeColor = snapshot.RiotFigure == LatencyLabels.NoReply ? Theme.CreamMuted : Theme.Cream;
+        _contextValue.Text = snapshot.ContextLine;
+        _changeValue.Text = snapshot.ChangeLine;
+        _changeValue.ForeColor = snapshot.ChangedHops.Count > 0 ? Theme.Amber : Theme.CreamMuted;
     }
 
     private void ApplyLogStrip(ProbeSnapshot snapshot)
@@ -411,15 +434,21 @@ internal sealed class MainForm : Form
 
     private void BindHops(ProbeSnapshot snapshot)
     {
+        var changed = new HashSet<int>(snapshot.ChangedHops);
         _hopsGrid.Rows.Clear();
         foreach (var hop in snapshot.Hops)
         {
-            _hopsGrid.Rows.Add(
+            var index = _hopsGrid.Rows.Add(
                 hop.Number.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 hop.Responded ? hop.Ip : "*",
                 hop.Hostname,
                 IcmpTiming.FormatHopRtt(hop.Responded, hop.RttMs),
                 RouteClassifier.DescribeHop(hop.Hostname));
+            if (!changed.Contains(hop.Number))
+                continue;
+
+            foreach (DataGridViewCell cell in _hopsGrid.Rows[index].Cells)
+                cell.Style.ForeColor = Theme.Amber;
         }
 
         // Adding rows selects the first one; a highlighted row the user never picked reads as a bug.
@@ -432,7 +461,7 @@ internal sealed class MainForm : Form
             : "";
     }
 
-    private void BindLog()
+    private void BindHistory()
     {
         IReadOnlyList<RouteRow> rows;
         try
@@ -442,46 +471,35 @@ internal sealed class MainForm : Form
         catch (Exception ex)
         {
             rows = Array.Empty<RouteRow>();
-            _logEmpty.Text = "Could not read the log: " + ex.Message;
+            _historyEmpty.Text = "Could not read the log: " + ex.Message;
         }
 
         var problem = _scheduler.Log.ReadProblem;
-        _logGrid.Rows.Clear();
-        var start = Math.Max(0, rows.Count - 50);
+        _historyGrid.Rows.Clear();
+        var start = Math.Max(0, rows.Count - 12);
         for (var i = rows.Count - 1; i >= start; i--)
         {
             var row = rows[i];
-            var riot = LatencyLabels.RiotCell(row.RiotHopAvg, row.RiotHopLossPct);
-            var index = _logGrid.Rows.Add(
+            var riot = RouteCardText.RiotFigure(row.RiotHopAvg, row.RiotHopLossPct);
+            var index = _historyGrid.Rows.Add(
                 row.Timestamp,
-                row.LeagueRunning,
-                row.Upstream,
-                row.HandoffNetwork,
-                row.HandoffHost,
-                row.HandoffIP,
-                row.HandoffCity,
-                row.HandoffRttMs,
-                row.LastHopIP,
-                row.LastHopHost,
-                row.LastHopMin,
-                row.LastHopAvg,
-                row.LastHopMax,
-                row.LastHopLossPct,
+                RouteCardText.RouteLine(row.Upstream, row.HandoffNetwork, row.HandoffCity),
+                RouteCardText.LastHopFigure(row.LastHopAvg, row.LastHopLossPct),
                 riot,
-                row.RiotHopLossPct,
-                row.FullPath);
+                RouteCardText.LeagueCell(row.LeagueRunning),
+                RouteCardText.RecentNetwork(row.Adapter, row.Wifi, row.Vpn));
             if (riot == LatencyLabels.NoReply)
-                _logGrid.Rows[index].Cells["RiotHopAvg"].Style.ForeColor = Theme.CreamMuted;
+                _historyGrid.Rows[index].Cells["Riot"].Style.ForeColor = Theme.CreamMuted;
         }
 
-        _logGrid.ClearSelection();
+        _historyGrid.ClearSelection();
         var noRows = rows.Count == 0;
-        _logEmpty.Visible = noRows;
-        _logGrid.Visible = !noRows;
+        _historyEmpty.Visible = noRows;
+        _historyGrid.Visible = !noRows;
         if (noRows && !string.IsNullOrWhiteSpace(problem))
-            _logEmpty.Text = problem;
+            _historyEmpty.Text = problem;
         else if (noRows)
-            _logEmpty.Text = "No rows yet. A finished test appends the first line to the log.";
+            _historyEmpty.Text = "No rows yet. A finished test appends the first line to the log.";
 
         BindSummary(rows, problem);
     }
@@ -543,12 +561,14 @@ internal sealed class MainForm : Form
         return Theme.Cream;
     }
 
-    private static string FormatVersion()
+    private static string FormatVersion() => "v" + VersionNumber();
+
+    private static string VersionNumber()
     {
         var version = Assembly.GetExecutingAssembly().GetName().Version;
         if (version == null)
-            return "v?";
-        return $"v{version.Major}.{version.Minor}.{version.Build}";
+            return "?";
+        return $"{version.Major}.{version.Minor}.{version.Build}";
     }
 
     private static Control BuildHeader(string version)
@@ -750,62 +770,175 @@ internal sealed class MainForm : Form
         return button;
     }
 
-    private static Control BuildStatus(
-        out Label mode,
-        out Label logging,
-        out Label league,
-        out Label next,
-        out Label phase,
-        out Label activity)
+    private Control BuildRouteCard(
+        out Label route,
+        out Label lastHop,
+        out Label riot,
+        out Label context,
+        out Label change,
+        out Label copyNote)
+    {
+        var card = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = 1,
+            RowCount = 5,
+            BackColor = Theme.Charcoal,
+            Padding = new Padding(10, 8, 10, 8),
+            Margin = new Padding(0, 0, 0, 4),
+        };
+        card.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+        card.RowStyles.Add(new RowStyle(SizeType.Absolute, LineHeight(Theme.Title) + 6));
+        card.RowStyles.Add(new RowStyle(SizeType.Absolute, LineHeight(Theme.Small) + LineHeight(Theme.Title) + 8));
+        card.RowStyles.Add(new RowStyle(SizeType.Absolute, LineHeight(Theme.Small) + 6));
+        card.RowStyles.Add(new RowStyle(SizeType.Absolute, LineHeight(Theme.Small) + 6));
+        card.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+        route = new Label
+        {
+            Text = "No route yet",
+            Dock = DockStyle.Fill,
+            Font = Theme.Title,
+            ForeColor = Theme.Cream,
+            TextAlign = ContentAlignment.MiddleLeft,
+            AutoEllipsis = true,
+            Margin = new Padding(0),
+            Padding = new Padding(0, 0, 0, 2),
+        };
+
+        var figures = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 1,
+            BackColor = Theme.Charcoal,
+            Margin = new Padding(0),
+        };
+        figures.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
+        figures.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
+        figures.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+        figures.Controls.Add(Figure("LAST HOP", out lastHop), 0, 0);
+        figures.Controls.Add(Figure("RIOT ICMP", out riot), 1, 0);
+
+        context = new Label
+        {
+            Text = "The first test fills this in.",
+            Dock = DockStyle.Fill,
+            Font = Theme.Small,
+            ForeColor = Theme.CreamMuted,
+            TextAlign = ContentAlignment.MiddleLeft,
+            AutoEllipsis = true,
+            Margin = new Padding(0),
+            Padding = new Padding(0, 0, 0, 1),
+        };
+        change = new Label
+        {
+            Text = "",
+            Dock = DockStyle.Fill,
+            Font = Theme.Small,
+            ForeColor = Theme.CreamMuted,
+            TextAlign = ContentAlignment.MiddleLeft,
+            AutoEllipsis = true,
+            Margin = new Padding(0),
+            Padding = new Padding(0, 0, 0, 1),
+        };
+
+        var actions = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = 2,
+            RowCount = 1,
+            BackColor = Theme.Charcoal,
+            Margin = new Padding(0, 4, 0, 0),
+        };
+        actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+        actions.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        actions.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        copyNote = new Label
+        {
+            Text = "",
+            Dock = DockStyle.Fill,
+            Font = Theme.Small,
+            ForeColor = Theme.Leaf,
+            TextAlign = ContentAlignment.MiddleLeft,
+            AutoEllipsis = true,
+            Margin = new Padding(0),
+            Padding = new Padding(0, 0, 8, 1),
+        };
+        var buttons = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            FlowDirection = FlowDirection.RightToLeft,
+            WrapContents = false,
+            BackColor = Theme.Charcoal,
+            Margin = new Padding(0),
+            Padding = new Padding(0),
+        };
+        buttons.Controls.Add(MakeStripButton("Run test now", (_, _) => _scheduler.RunNow()));
+        buttons.Controls.Add(MakeStripButton("Copy diagnosis", (_, _) => CopyDiagnosis()));
+        actions.Controls.Add(copyNote, 0, 0);
+        actions.Controls.Add(buttons, 1, 0);
+
+        card.Controls.Add(route, 0, 0);
+        card.Controls.Add(figures, 0, 1);
+        card.Controls.Add(context, 0, 2);
+        card.Controls.Add(change, 0, 3);
+        card.Controls.Add(actions, 0, 4);
+        return card;
+    }
+
+    private static Control Figure(string caption, out Label value)
+    {
+        var stack = new Panel { Dock = DockStyle.Fill, Margin = new Padding(0, 0, 12, 0), BackColor = Theme.Charcoal };
+        var cap = new Label
+        {
+            Text = caption,
+            Dock = DockStyle.Top,
+            Height = LineHeight(Theme.Small) + 2,
+            ForeColor = Theme.CreamMuted,
+            Font = Theme.Small,
+            Padding = new Padding(0, 0, 0, 1),
+        };
+        value = new Label
+        {
+            Text = "\u2014",
+            Dock = DockStyle.Top,
+            Height = LineHeight(Theme.Title) + 4,
+            ForeColor = Theme.Cream,
+            Font = Theme.Title,
+            Padding = new Padding(0, 0, 0, 2),
+        };
+        stack.Controls.Add(value);
+        stack.Controls.Add(cap);
+        return stack;
+    }
+
+    private static Control BuildStatus(out Label logging, out Label next, out Label phase)
     {
         var panel = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            ColumnCount = 4,
-            RowCount = 3,
+            ColumnCount = 3,
+            RowCount = 1,
             BackColor = Theme.Charcoal,
             Padding = new Padding(10, 6, 10, 6),
-            Margin = new Padding(0),
+            Margin = new Padding(0, 0, 0, 4),
         };
-        for (var i = 0; i < 4; i++)
-            panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25));
-        // Chips, then the phase line, then the activity line: each row is as tall as its font needs.
+        for (var i = 0; i < 3; i++)
+            panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.33f));
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, ChipHeight));
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, LineHeight(Theme.Body) + 3));
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, LineHeight(Theme.Body) + 5));
 
-        panel.Controls.Add(Chip("Schedule", out mode), 0, 0);
-        panel.Controls.Add(Chip("Logging", out logging), 1, 0);
-        panel.Controls.Add(Chip("League", out league), 2, 0);
-        panel.Controls.Add(Chip("Next test", out next), 3, 0);
-
-        phase = new Label
-        {
-            Dock = DockStyle.Fill,
-            ForeColor = Theme.Cream,
-            Font = Theme.Body,
-            TextAlign = ContentAlignment.MiddleLeft,
-            Text = "Idle",
-            Margin = new Padding(0),
-        };
-        panel.Controls.Add(phase, 0, 1);
-        panel.SetColumnSpan(phase, 4);
-
-        // Latest activity only; the full history is in activity.log beside the CSV.
-        activity = new Label
-        {
-            Dock = DockStyle.Fill,
-            ForeColor = Theme.Cream,
-            Font = Theme.Body,
-            TextAlign = ContentAlignment.MiddleLeft,
-            AutoEllipsis = true,
-            Margin = new Padding(0),
-            Text = "No activity yet.",
-        };
-        panel.Controls.Add(activity, 0, 2);
-        panel.SetColumnSpan(activity, 4);
+        panel.Controls.Add(Chip("Logging", out logging), 0, 0);
+        panel.Controls.Add(Chip("Next test", out next), 1, 0);
+        panel.Controls.Add(Chip("Phase", out phase), 2, 0);
         return panel;
     }
 
@@ -973,72 +1106,5 @@ internal sealed class MainForm : Form
         column.AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
         column.MinimumWidth = LogicalToDeviceUnits(minimumWidth);
     }
-
-    /// <summary>
-    /// Puts Timestamp / Upstream / city / last-hop latency up front, freezes the first two,
-    /// and keeps horizontal scroll for the long FullPath tail. Riot ICMP sits after the
-    /// path numbers because Riot usually filters ping.
-    /// </summary>
-    private void ConfigureLogColumns(DataGridView grid)
-    {
-        var front = new[]
-        {
-            "Timestamp",
-            "Upstream",
-            "HandoffCity",
-            "LastHopAvg",
-            "LastHopLossPct",
-            "HandoffRttMs",
-            "RiotHopAvg",
-            "RiotHopLossPct",
-            "LeagueRunning",
-            "HandoffNetwork",
-            "HandoffHost",
-            "HandoffIP",
-            "LastHopIP",
-            "LastHopHost",
-            "LastHopMin",
-            "LastHopMax",
-            "FullPath",
-        };
-
-        var order = 0;
-        foreach (var name in front)
-        {
-            if (!grid.Columns.Contains(name))
-                continue;
-            var column = grid.Columns[name];
-            column.DisplayIndex = order++;
-            column.AutoSizeMode = name == "FullPath"
-                ? DataGridViewAutoSizeColumnMode.None
-                : DataGridViewAutoSizeColumnMode.DisplayedCells;
-            column.SortMode = DataGridViewColumnSortMode.NotSortable;
-        }
-
-        if (grid.Columns.Contains("Timestamp"))
-        {
-            grid.Columns["Timestamp"].Frozen = true;
-            grid.Columns["Timestamp"].MinimumWidth = LogicalToDeviceUnits(140);
-        }
-
-        if (grid.Columns.Contains("Upstream"))
-        {
-            grid.Columns["Upstream"].Frozen = true;
-            grid.Columns["Upstream"].MinimumWidth = LogicalToDeviceUnits(72);
-        }
-
-        foreach (var name in new[] { "HandoffRttMs", "LastHopAvg", "RiotHopAvg" })
-        {
-            if (grid.Columns.Contains(name))
-                StyleNumberColumn(grid.Columns[name]);
-        }
-
-        if (grid.Columns.Contains("FullPath"))
-        {
-            grid.Columns["FullPath"].MinimumWidth = LogicalToDeviceUnits(220);
-            grid.Columns["FullPath"].Width = LogicalToDeviceUnits(320);
-        }
-
-        grid.ScrollBars = ScrollBars.Both;
-    }
 }
+
