@@ -19,6 +19,6 @@ internal static class Theme
     public static readonly Font Body = new("Segoe UI", 11f, FontStyle.Regular, GraphicsUnit.Point);
     public static readonly Font Small = new("Segoe UI", 10f, FontStyle.Regular, GraphicsUnit.Point);
     public static readonly Font Section = new("Segoe UI", 12f, FontStyle.Bold, GraphicsUnit.Point);
-    /// <summary>Hop RTT / summary averages — slightly larger for scanability.</summary>
-    public static readonly Font GridNumber = new("Segoe UI", 11f, FontStyle.Bold, GraphicsUnit.Point);
+    /// <summary>Hop RTT and the recent-test numbers. Same size as the grid text, bold.</summary>
+    public static readonly Font GridNumber = new("Segoe UI", 10f, FontStyle.Bold, GraphicsUnit.Point);
 }

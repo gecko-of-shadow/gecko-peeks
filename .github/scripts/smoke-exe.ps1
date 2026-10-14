@@ -342,7 +342,7 @@ function StripLayout([IntPtr]$Form) {
     $problems = [System.Collections.Generic.List[string]]::new()
     $details = [System.Collections.Generic.List[string]]::new()
     $formRect = RectOf $Form
-    $targets = [ordered]@{ "LOCAL LOG (CSV)" = "*.STATIC.*"; "Open log" = "*.BUTTON.*"; "Open folder" = "*.BUTTON.*"; "Copy path" = "*.BUTTON.*" }
+    $targets = [ordered]@{ "Log" = "*.STATIC.*"; "Open log" = "*.BUTTON.*"; "Open folder" = "*.BUTTON.*"; "Copy path" = "*.BUTTON.*" }
     foreach ($text in $targets.Keys) {
         $handle = ControlWithText $Form $text $targets[$text]
         $rect = RectOf $handle
