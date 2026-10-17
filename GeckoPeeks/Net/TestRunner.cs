@@ -19,7 +19,8 @@ public sealed class ProbeProgress
 public static class TestRunner
 {
     public const string TraceTarget = "192.207.0.5";
-    public const string RiotPingTarget = "104.160.141.51";
+    /// <summary>The address the Riot ICMP series pings. Same as the trace target; kept separate so it can change later.</summary>
+    public const string RiotPingTarget = TraceTarget;
     public const int MaxHops = 25;
     public const int HopTimeoutMs = 1000;
     public const int DnsTimeoutMs = 800;

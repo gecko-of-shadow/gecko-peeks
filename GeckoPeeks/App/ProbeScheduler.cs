@@ -509,7 +509,7 @@ public sealed class ProbeScheduler : IDisposable
         if (!_riotNoReplyNoted && LatencyLabels.RiotNoReply(row.RiotHopAvg, row.RiotHopLossPct))
         {
             _riotNoReplyNoted = true;
-            Note($"Riot ICMP ({TestRunner.RiotPingTarget}) gave no reply (Riot filters ping). Latency shown is the last hop (path), not in-game ping.");
+            Note($"Riot ICMP ({TestRunner.RiotPingTarget}, the traceroute target) gave no reply (Riot filters ping). Latency shown is the last hop (path), not in-game ping.");
         }
 
         if (!string.IsNullOrWhiteSpace(row.Error))

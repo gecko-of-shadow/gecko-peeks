@@ -71,7 +71,7 @@ The window's **Log** row shows the CSV in use and one status line (last write, w
 Each test pings two addresses ten times:
 
 - **Last hop ms** (`LastHopAvg`) is the average ping to the last router that answered the traceroute. It is path latency, not in-game ping.
-- **Riot ICMP** (`RiotHopAvg`) is the average ping to `104.160.141.51`. Riot drops ping on many paths. When every ping is lost, the window shows **no reply** (the CSV keeps `RiotHopAvg` blank and `RiotHopLossPct` at 100), and the series stops after 3 unanswered pings so the row is written sooner.
+- **Riot ICMP** (`RiotHopAvg`) is the average ping to `192.207.0.5`, the same address the traceroute targets. Riot drops ping on many paths. When every ping is lost, the window shows **no reply** (the CSV keeps `RiotHopAvg` blank and `RiotHopLossPct` at 100), and the series stops after 3 unanswered pings so the row is written sooner.
 
 The upstream summary shows both columns side by side and never fills one from the other. Those CSV column names are unchanged. v1.0.13 appends `Adapter`, `Wifi`, `Gateway`, and `Vpn` after `FullPath`. An older log keeps its rows; the header is widened on the next save, and the older rows leave the new fields blank. `Vpn` is `Y` when the default-route adapter is a known tunnel (WireGuard, NordLynx, Tailscale, OpenVPN, and the like). A hop-only path change is written to `activity.log` and shown on the card. A balloon still fires only when the upstream or the handoff city changes.
 
