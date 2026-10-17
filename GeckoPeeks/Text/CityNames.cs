@@ -33,6 +33,8 @@ public static class CityNames
         ["yyz"] = "Toronto",
         ["tor"] = "Toronto",
         ["yul"] = "Montreal",
+        ["kanc"] = "Kansas City",
+        ["palo"] = "Palo Alto",
     };
 
     public static string Display(string? code)

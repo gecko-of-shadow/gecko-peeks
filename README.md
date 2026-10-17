@@ -87,7 +87,7 @@ Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" 
 
 Each responding hop is checked for official domains (`zayo.com`, `cogentco.com`, `telus.net` / `telus.com`, `wolfpaw.net`, `he.net`) and label-anchored stems for mixed names. **Upstream** is the provider on the last hop that matches one of those and does not also name a different network.
 
-**Handoff** is the first hop after that upstream hop whose hostname belongs to a different recognized network. `twelve99.net` or a `telia` label means Telia. A hostname such as `zayo-telia...` names both, so it is the handoff onto Telia, not another Zayo hop. The city code prefers known city tokens and skips interface names (`ae5`, `ccr31`, `core1`).
+**Handoff** is the first hop after that upstream hop whose hostname belongs to a different recognized network. `twelve99.net` or a `telia` label means Telia. A hostname such as `zayo-telia...` names both, so it is the handoff onto Telia, not another Zayo hop. The city code prefers known city tokens and skips interface and role names (`ae5`, `ccr31`, `core1`, Zayo's `cs3`). A 4-letter label with no digit is used only when it is a known code (`kanc` → Kansas City, `palo` → Palo Alto).
 
 If that choice is wrong for your path, the rule lives in `GeckoPeeks/Routing/RouteClassifier.cs`.
 

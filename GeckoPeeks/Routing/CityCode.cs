@@ -8,6 +8,7 @@ namespace GeckoPeeks.Routing;
 /// Tokens are split on '.' and '-'. Interface/role tokens (ae5, ccr31, core1)
 /// are skipped. Prefer a token whose letter prefix is a known city, otherwise
 /// the first remaining city-shaped token with a digit, otherwise a bare 3-letter city.
+/// A bare 4-letter token is used only when it is a known code (kanc, palo).
 /// </summary>
 public static partial class CityCode
 {
@@ -24,7 +25,7 @@ public static partial class CityCode
     private static readonly string[] InterfacePrefixes =
     {
         "ae", "be", "xe", "et", "ge", "po", "te", "hu", "cr", "ccr", "core",
-        "agg", "edge", "mpr", "br", "bb", "lo", "ic", "peer", "rtr",
+        "agg", "edge", "mpr", "br", "bb", "lo", "ic", "peer", "rtr", "cs",
     };
 
     public static string Extract(string? hostname)
@@ -60,6 +61,11 @@ public static partial class CityCode
                 if (CityNames.IsKnownCode(lower))
                     return lower;
                 firstBareCity ??= lower;
+            }
+            else if (token.Length == 4 && CityNames.IsKnownCode(lower))
+            {
+                // Four-letter codes (kanc) only when known; plenty of 4-letter labels are not cities.
+                return lower;
             }
         }
 
