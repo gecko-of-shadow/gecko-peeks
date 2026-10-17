@@ -1,4 +1,4 @@
-﻿# logic-fixes progress
+# logic-fixes progress
 
 Branch `logic-fixes`, one commit per item. Run `dotnet test -c Release` after each.
 
@@ -12,8 +12,8 @@ confirmation is skipped; it neither confirms nor resets the pending change.
 |---|------|--------|--------|--------------|
 | 1 | Riot ping target = TraceTarget | done | a851e9c | RiotPingTarget = TraceTarget; note text + README updated; TestRunner.cs linked into tests |
 | 2 | Last-hop latency mtr-style (TTL-limited echoes) | done | bbaec23 | LastHop() skips the target; TTL=hop echoes to TraceTarget, only Time Exceeded from that IP counts; README updated |
-| 3 | 3 probes per TTL | done | (see next row's commit) | ProbesPerHop=3; MergeProbes(): first answering IP, its lowest RTT, any Success reaches target; silent only if all 3 fail |
-| 4 | False change alerts (HopDiff stars, city names, 2-test confirm) | todo | | |
+| 3 | 3 probes per TTL | done | b0523d6 | ProbesPerHop=3; MergeProbes(): first answering IP, its lowest RTT, any Success reaches target; silent only if all 3 fail |
+| 4 | False change alerts (HopDiff stars, city names, 2-test confirm) | done | (see next row's commit) | HopDiff ignores IP<->*; RouteChange compares Display() names, blank-city-after-city is indeterminate; RouteChangeConfirmer (in RouteChange.cs) gates the balloon on 2 agreeing tests |
 | 5 | Adapter/VPN via GetBestInterfaceEx | todo | | |
 | 6 | City codes (cs prefix, 4-letter known codes, kanc/palo) | todo | | |
 

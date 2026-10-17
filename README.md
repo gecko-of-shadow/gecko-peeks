@@ -73,7 +73,7 @@ Each test pings two addresses ten times:
 - **Last hop ms** (`LastHopAvg`) is measured mtr-style at the last router before the target that answered the traceroute: echoes go to the trace target with the TTL set to that hop's number, and only that router's Time Exceeded replies count (anything else is loss). It is path latency, not in-game ping. When only the target answered the traceroute, the last-hop fields are blank.
 - **Riot ICMP** (`RiotHopAvg`) is the average ping to `192.207.0.5`, the same address the traceroute targets. Riot drops ping on many paths. When every ping is lost, the window shows **no reply** (the CSV keeps `RiotHopAvg` blank and `RiotHopLossPct` at 100), and the series stops after 3 unanswered pings so the row is written sooner.
 
-The upstream summary shows both columns side by side and never fills one from the other. Those CSV column names are unchanged. v1.0.13 appends `Adapter`, `Wifi`, `Gateway`, and `Vpn` after `FullPath`. An older log keeps its rows; the header is widened on the next save, and the older rows leave the new fields blank. `Vpn` is `Y` when the default-route adapter is a known tunnel (WireGuard, NordLynx, Tailscale, OpenVPN, and the like). A hop-only path change is written to `activity.log` and shown on the card. A balloon still fires only when the upstream or the handoff city changes.
+The upstream summary shows both columns side by side and never fills one from the other. Those CSV column names are unchanged. v1.0.13 appends `Adapter`, `Wifi`, `Gateway`, and `Vpn` after `FullPath`. An older log keeps its rows; the header is widened on the next save, and the older rows leave the new fields blank. `Vpn` is `Y` when the default-route adapter is a known tunnel (WireGuard, NordLynx, Tailscale, OpenVPN, and the like). A hop-only path change is written to `activity.log` and shown on the card. Only an address that became a different address, or a path that got longer or shorter, counts; a hop that went to `*` or came back from `*` does not. A balloon still fires only when the upstream or the handoff city changes (see below).
 
 ## Start with Windows
 
@@ -91,7 +91,7 @@ Each responding hop is checked for official domains (`zayo.com`, `cogentco.com`,
 
 If that choice is wrong for your path, the rule lives in `GeckoPeeks/Routing/RouteClassifier.cs`.
 
-The tray tooltip looks like `Zayo → Telia sea1 | last hop 21 ms | 2 min ago` and names where its number came from: `Riot 61 ms` when Riot answered ping, else `last hop`, else `handoff` (the handoff hop's traceroute RTT). A balloon fires only when the upstream or the handoff city changes after the first logged test, and not when either side is blank/`Unknown`. City names in the balloon (`den3` → Denver, `sea1` → Seattle) are display-only; the CSV stores the code.
+The tray tooltip looks like `Zayo → Telia sea1 | last hop 21 ms | 2 min ago` and names where its number came from: `Riot 61 ms` when Riot answered ping, else `last hop`, else `handoff` (the handoff hop's traceroute RTT). A balloon fires only when the upstream or the handoff city changes after the first logged test, and only once two logged tests in a row agree on the new upstream and city. Cities compare by name, so `sea1` → `sea2` is not a change. A test that is blank/`Unknown`, or whose city went blank after a known one, neither counts toward a change nor cancels one waiting for its second test. The pending change is kept in memory only. City names in the balloon (`den3` → Denver, `sea1` → Seattle) are display-only; the CSV stores the code.
 
 ## Release
 

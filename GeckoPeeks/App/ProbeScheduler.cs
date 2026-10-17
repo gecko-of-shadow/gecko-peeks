@@ -86,9 +86,6 @@ public sealed class ProbeScheduler : IDisposable
     private string _phase = "Idle";
     private string _lastError = "";
     private string _activityLine = "Waiting to start.";
-    private string _prevUpstream = "";
-    private string _prevCity = "";
-    private string _prevNetwork = "";
     private string _tipUpstream = "";
     private string _tipNetwork = "";
     private string _tipCity = "";
@@ -105,6 +102,7 @@ public sealed class ProbeScheduler : IDisposable
     private string _prevFullPath = "";
     private string _pathChange = "";
     private string _pendingHopNote = "";
+    private readonly RouteChangeConfirmer _routeChange = new();
     private List<int> _changedHops = new();
     private string _logWriteStatus = LogStatusText.Waiting(null);
     private string _activityFolder;
@@ -547,15 +545,9 @@ public sealed class ProbeScheduler : IDisposable
     private void Remember(RouteRow row)
     {
         var had = _hasPrevious;
-        var prevUp = _prevUpstream;
-        var prevCity = _prevCity;
-        var prevNet = _prevNetwork;
         var prevPath = _prevFullPath;
 
         _hasPrevious = true;
-        _prevUpstream = row.Upstream;
-        _prevCity = row.HandoffCity;
-        _prevNetwork = row.HandoffNetwork;
         _prevFullPath = row.FullPath;
         _tipUpstream = row.Upstream;
         _tipNetwork = row.HandoffNetwork;
@@ -590,10 +582,8 @@ public sealed class ProbeScheduler : IDisposable
             _tipTimestamp = DateTime.Now;
         }
 
-        if (!had)
-            return;
-
-        var message = RouteChange.Describe(true, prevUp, prevCity, prevNet, row.Upstream, row.HandoffCity, row.HandoffNetwork);
+        // Fires only once two logged tests in a row agree on the new upstream and city.
+        var message = _routeChange.Observe(row.Upstream, row.HandoffCity, row.HandoffNetwork);
         if (!string.IsNullOrWhiteSpace(message))
             Post(() => RouteChanged?.Invoke(message));
     }
@@ -666,9 +656,7 @@ public sealed class ProbeScheduler : IDisposable
     private void ApplyRemembered(RouteRow last, AppSettings settings)
     {
         _hasPrevious = true;
-        _prevUpstream = last.Upstream;
-        _prevCity = last.HandoffCity;
-        _prevNetwork = last.HandoffNetwork;
+        _routeChange.Seed(last.Upstream, last.HandoffCity, last.HandoffNetwork);
         _tipUpstream = last.Upstream;
         _tipNetwork = last.HandoffNetwork;
         _tipCity = last.HandoffCity;
@@ -709,9 +697,7 @@ public sealed class ProbeScheduler : IDisposable
             return;
 
         _hasPrevious = true;
-        _prevUpstream = last.Upstream;
-        _prevCity = last.HandoffCity;
-        _prevNetwork = last.HandoffNetwork;
+        _routeChange.Seed(last.Upstream, last.HandoffCity, last.HandoffNetwork);
         _tipUpstream = last.Upstream;
         _tipNetwork = last.HandoffNetwork;
         _tipCity = last.HandoffCity;

@@ -1,7 +1,8 @@
 namespace GeckoPeeks.Text;
 
 /// <summary>
-/// Compares two FullPath strings hop by hop. A star that stays a star is not a change.
+/// Compares two FullPath strings hop by hop. Only an IP that became a different IP, or a
+/// hop added or dropped at the end, is a change. A star on either side is not.
 /// The first test has no previous path, and <see cref="Describe"/> returns empty for that.
 /// </summary>
 public static class HopDiff
@@ -51,6 +52,12 @@ public static class HopDiff
     private static bool SameHop(string before, string after)
     {
         if (before.Length == 0 && after.Length == 0)
+            return true;
+        // A hop present on one side only is a length change.
+        if (before.Length == 0 || after.Length == 0)
+            return false;
+        // A lost probe ("*") says nothing about the router, so IP to star and back is not a change.
+        if (before == "*" || after == "*")
             return true;
         return string.Equals(before, after, StringComparison.Ordinal);
     }
