@@ -147,6 +147,36 @@ public class NetworkContextTests
     }
 
     [Fact]
+    public void Best_interface_index_picks_a_split_tunnel_without_a_gateway()
+    {
+        // OpenVPN-style 0/1 + 128/1: the tunnel has no 0.0.0.0/0 route and no gateway,
+        // so the metric comparison alone picks Ethernet.
+        var candidates = new[]
+        {
+            Nic("Ethernet", true, false, false, "192.168.1.1", 25) with { Index = 3 },
+            Nic("OpenVPN Data Channel Offload", true, false, false, "", null, "OpenVPN Data Channel Offload") with { Index = 17 },
+        };
+
+        Assert.Equal("Ethernet", NetworkContext.Choose(candidates)!.Name);
+
+        var chosen = NetworkContext.ChooseByIndex(candidates, 17);
+        Assert.NotNull(chosen);
+        var snapshot = NetworkContext.FromCandidate(chosen!, wifi: null);
+        Assert.Equal("OpenVPN Data Channel Offload", snapshot.Adapter);
+        Assert.Equal("", snapshot.Gateway);
+        Assert.Equal("Y", snapshot.Vpn);
+    }
+
+    [Fact]
+    public void Best_interface_index_with_no_match_returns_null()
+    {
+        var candidates = new[] { Nic("Ethernet", true, false, false, "192.168.1.1", 25) with { Index = 3 } };
+
+        Assert.Null(NetworkContext.ChooseByIndex(candidates, 99));
+        Assert.Equal("Ethernet", NetworkContext.ChooseByIndex(candidates, 3)!.Name);
+    }
+
+    [Fact]
     public void Vpn_tokens_do_not_match_a_bare_tap()
     {
         Assert.False(NetworkContext.IsVpn("Ethernet", "TAP-Windows Adapter V9"));

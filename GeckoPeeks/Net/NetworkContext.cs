@@ -10,7 +10,7 @@ public readonly record struct NetworkSnapshot(string Adapter, string Wifi, strin
 }
 
 /// <summary>
-/// The interface the default IPv4 route leaves on, sampled once per test.
+/// The interface traffic to the trace target leaves on, sampled once per test.
 /// A failure leaves every field blank and does not fail the test.
 /// </summary>
 public static class NetworkContext
@@ -32,7 +32,8 @@ public static class NetworkContext
         bool IsWireless,
         string? Gateway,
         int? Metric,
-        string InterfaceId = "");
+        string InterfaceId = "",
+        int? Index = null);
 
     public static NetworkSnapshot Capture()
     {
@@ -43,9 +44,11 @@ public static class NetworkContext
             foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
             {
                 int? metric = null;
+                int? nicIndex = null;
                 try
                 {
                     var index = nic.GetIPProperties().GetIPv4Properties().Index;
+                    nicIndex = index;
                     if (metrics.TryGetValue(index, out var value))
                         metric = value;
                 }
@@ -62,10 +65,15 @@ public static class NetworkContext
                     nic.NetworkInterfaceType == NetworkInterfaceType.Wireless80211,
                     FirstGateway(nic),
                     metric,
-                    nic.Id ?? ""));
+                    nic.Id ?? "",
+                    nicIndex));
             }
 
-            var chosen = Choose(candidates);
+            // The OS's own pick for the trace target sees split tunnels (0/1 + 128/1) that a
+            // 0.0.0.0/0 metric comparison misses. Fall back to that comparison if it fails.
+            var best = BestInterfaceIndex(TestRunner.TraceTarget);
+            var chosen = (best is int bestIndex ? ChooseByIndex(candidates, bestIndex) : null)
+                ?? Choose(candidates);
             if (chosen == null)
                 return NetworkSnapshot.Empty;
 
@@ -92,6 +100,21 @@ public static class NetworkContext
         }
 
         return best;
+    }
+
+    /// <summary>
+    /// The interface Windows routes the trace target over. A tunnel may have no gateway;
+    /// it is still the adapter in use.
+    /// </summary>
+    public static Candidate? ChooseByIndex(IReadOnlyList<Candidate> candidates, int index)
+    {
+        foreach (var candidate in candidates)
+        {
+            if (candidate.Index == index && !candidate.IsLoopback)
+                return candidate;
+        }
+
+        return null;
     }
 
     public static NetworkSnapshot FromCandidate(Candidate chosen, string? wifi)
@@ -175,6 +198,30 @@ public static class NetworkContext
 
         return map;
     }
+
+    /// <summary>GetBestInterfaceEx for an IPv4 destination; null when the call fails.</summary>
+    private static int? BestInterfaceIndex(string destination)
+    {
+        try
+        {
+            if (!IPAddress.TryParse(destination, out var address)
+                || address.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork)
+                return null;
+
+            // sockaddr_in: family (AF_INET = 2), port 0, address in network order, 8 zero bytes.
+            var sockaddr = new byte[16];
+            sockaddr[0] = 2;
+            address.GetAddressBytes().CopyTo(sockaddr, 4);
+            return GetBestInterfaceEx(sockaddr, out var index) == 0 ? (int)index : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    [DllImport("iphlpapi.dll")]
+    private static extern int GetBestInterfaceEx(byte[] destAddr, out uint bestIfIndex);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct MibIpForwardRow
