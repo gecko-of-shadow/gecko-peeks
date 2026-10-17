@@ -10,8 +10,8 @@ confirmation is skipped; it neither confirms nor resets the pending change.
 
 | # | Item | Status | Commit | What changed |
 |---|------|--------|--------|--------------|
-| 1 | Riot ping target = TraceTarget | done | (see next row's commit) | RiotPingTarget = TraceTarget; note text + README updated; TestRunner.cs linked into tests |
-| 2 | Last-hop latency mtr-style (TTL-limited echoes) | todo | | |
+| 1 | Riot ping target = TraceTarget | done | a851e9c | RiotPingTarget = TraceTarget; note text + README updated; TestRunner.cs linked into tests |
+| 2 | Last-hop latency mtr-style (TTL-limited echoes) | done | (see next row's commit) | LastHop() skips the target; TTL=hop echoes to TraceTarget, only Time Exceeded from that IP counts; README updated |
 | 3 | 3 probes per TTL | todo | | |
 | 4 | False change alerts (HopDiff stars, city names, 2-test confirm) | todo | | |
 | 5 | Adapter/VPN via GetBestInterfaceEx | todo | | |

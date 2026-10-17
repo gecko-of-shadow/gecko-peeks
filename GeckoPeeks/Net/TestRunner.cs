@@ -84,17 +84,23 @@ public static class TestRunner
         row.HandoffCity = features.HandoffCity;
         row.HandoffRttMs = features.HandoffRttMs;
 
-        var last = LastResponding(hops);
-        if (last != null && IPAddress.TryParse(last.Ip, out var lastAddress))
+        // mtr-style: TTL-limited echoes toward the trace target, counted only when that hop
+        // answers Time Exceeded. Pinging the router's own IP would test its control plane.
+        var last = LastHop(hops);
+        if (last != null
+            && IPAddress.TryParse(last.Ip, out var lastAddress)
+            && IPAddress.TryParse(TraceTarget, out var traceAddress))
         {
             row.LastHopIP = last.Ip;
             row.LastHopHost = last.Hostname;
             var stats = await PingSeriesAsync(
-                lastAddress,
+                traceAddress,
                 PingCount,
                 HopTimeoutMs,
                 index => Report(progress, $"Ping last hop {index}/{PingCount}", hops),
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken,
+                options: new PingOptions(last.Number, dontFragment: false),
+                accept: (status, from) => IsHopReply(status, from, lastAddress)).ConfigureAwait(false);
             row.LastHopMin = stats.Min;
             row.LastHopAvg = stats.Avg;
             row.LastHopMax = stats.Max;
@@ -236,8 +242,11 @@ public static class TestRunner
         int timeoutMs,
         Action<int> onEach,
         CancellationToken cancellationToken,
-        int giveUpAfter = 0)
+        int giveUpAfter = 0,
+        PingOptions? options = null,
+        Func<IPStatus, IPAddress?, bool>? accept = null)
     {
+        accept ??= (status, _) => status == IPStatus.Success;
         var sent = 0;
         var ok = 0;
         long sum = 0;
@@ -260,11 +269,11 @@ public static class TestRunner
                     address,
                     TimeSpan.FromMilliseconds(timeoutMs),
                     buffer,
-                    new PingOptions(),
+                    options ?? new PingOptions(),
                     cancellationToken).ConfigureAwait(false);
                 clock.Stop();
 
-                if (reply.Status != IPStatus.Success)
+                if (!accept(reply.Status, reply.Address))
                     continue;
 
                 var rtt = IcmpTiming.ResolveRttMs(reply.RoundtripTime, clock.Elapsed.TotalMilliseconds);
@@ -300,16 +309,26 @@ public static class TestRunner
             loss);
     }
 
-    private static HopObservation? LastResponding(IReadOnlyList<HopObservation> hops)
+    /// <summary>
+    /// The last responding hop short of the target. Null when only the target answered,
+    /// so the last-hop fields stay blank.
+    /// </summary>
+    public static HopObservation? LastHop(IReadOnlyList<HopObservation> hops)
     {
         for (var i = hops.Count - 1; i >= 0; i--)
         {
-            if (hops[i].Responded && IPAddress.TryParse(hops[i].Ip, out _))
+            if (hops[i].Responded && !hops[i].ReachedTarget && IPAddress.TryParse(hops[i].Ip, out _))
                 return hops[i];
         }
 
         return null;
     }
+
+    /// <summary>A TTL-limited echo counts only when the expected hop sent Time Exceeded. Anything else is loss.</summary>
+    public static bool IsHopReply(IPStatus status, IPAddress? from, IPAddress hop) =>
+        status is IPStatus.TtlExpired or IPStatus.TimeExceeded
+        && from != null
+        && from.Equals(hop);
 
     private static void Report(IProgress<ProbeProgress>? progress, string phase, IReadOnlyList<HopObservation>? hops)
     {
