@@ -23,6 +23,8 @@ public static class TestRunner
     public const string RiotPingTarget = TraceTarget;
     public const int MaxHops = 25;
     public const int HopTimeoutMs = 1000;
+    /// <summary>Traceroute probes per TTL. A TTL is silent only when every probe failed.</summary>
+    public const int ProbesPerHop = 3;
     public const int DnsTimeoutMs = 800;
     public const int PingCount = 10;
     /// <summary>The Riot series stops after this many pings with no reply (100% loss either way).</summary>
@@ -140,39 +142,42 @@ public static class TestRunner
             cancellationToken.ThrowIfCancellationRequested();
             Report(progress, $"Hop {ttl}/{MaxHops}", hops);
 
-            HopObservation hop;
-            try
+            var probes = new List<ProbeResult>(ProbesPerHop);
+            for (var probe = 0; probe < ProbesPerHop; probe++)
             {
-                var options = new PingOptions(ttl, dontFragment: false);
-                var clock = Stopwatch.StartNew();
-                var reply = await ping.SendPingAsync(
-                    target,
-                    TimeSpan.FromMilliseconds(HopTimeoutMs),
-                    buffer,
-                    options,
-                    cancellationToken).ConfigureAwait(false);
-                clock.Stop();
+                try
+                {
+                    var options = new PingOptions(ttl, dontFragment: false);
+                    var clock = Stopwatch.StartNew();
+                    var reply = await ping.SendPingAsync(
+                        target,
+                        TimeSpan.FromMilliseconds(HopTimeoutMs),
+                        buffer,
+                        options,
+                        cancellationToken).ConfigureAwait(false);
+                    clock.Stop();
 
-                var responded = reply.Status is IPStatus.Success or IPStatus.TtlExpired or IPStatus.TimeExceeded
-                    && reply.Address != null;
-                var ip = responded ? reply.Address!.ToString() : "*";
-                // RoundtripTime is often 0 for TtlExpired on Windows; use wall time
-                // (TotalMilliseconds) so sub-ms hops are not lost to long truncation.
-                var rtt = IcmpTiming.ResolveRespondedRttMs(
-                    responded,
-                    reply.RoundtripTime,
-                    clock.Elapsed.TotalMilliseconds);
-                hop = new HopObservation(ttl, ip, "", rtt, responded, reply.Status == IPStatus.Success);
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch
-            {
-                hop = new HopObservation(ttl, "*", "", null, false, false);
+                    var responded = reply.Status is IPStatus.Success or IPStatus.TtlExpired or IPStatus.TimeExceeded
+                        && reply.Address != null;
+                    // RoundtripTime is often 0 for TtlExpired on Windows; use wall time
+                    // (TotalMilliseconds) so sub-ms hops are not lost to long truncation.
+                    var rtt = IcmpTiming.ResolveRespondedRttMs(
+                        responded,
+                        reply.RoundtripTime,
+                        clock.Elapsed.TotalMilliseconds);
+                    probes.Add(new ProbeResult(reply.Status, responded ? reply.Address!.ToString() : null, rtt));
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch
+                {
+                    probes.Add(new ProbeResult(IPStatus.Unknown, null, null));
+                }
             }
 
+            var hop = MergeProbes(ttl, probes);
             hops.Add(hop);
             Report(progress, hop.ReachedTarget ? "Reached target" : $"Hop {ttl}/{MaxHops}", hops);
             if (hop.ReachedTarget)
@@ -310,6 +315,29 @@ public static class TestRunner
     }
 
     /// <summary>
+    /// One hop from several probes at the same TTL. It responded if any probe answered; the IP is
+    /// the first answering one, the RTT the lowest from that IP. Success from any probe reaches the target.
+    /// </summary>
+    public static HopObservation MergeProbes(int ttl, IReadOnlyList<ProbeResult> probes)
+    {
+        string? ip = null;
+        long? rtt = null;
+        foreach (var probe in probes)
+        {
+            if (probe.Ip == null)
+                continue;
+            ip ??= probe.Ip;
+            if (probe.Ip == ip && probe.RttMs is long value && (rtt == null || value < rtt))
+                rtt = value;
+        }
+
+        var reached = probes.Any(probe => probe.Status == IPStatus.Success);
+        return ip == null
+            ? new HopObservation(ttl, "*", "", null, false, reached)
+            : new HopObservation(ttl, ip, "", rtt, true, reached);
+    }
+
+    /// <summary>
     /// The last responding hop short of the target. Null when only the target answered,
     /// so the last-hop fields stay blank.
     /// </summary>
@@ -345,4 +373,7 @@ public static class TestRunner
     }
 
     private readonly record struct PingStats(string Min, string Avg, string Max, string LossPct);
+
+    /// <summary>One traceroute probe. <see cref="Ip"/> is null when nothing answered.</summary>
+    public readonly record struct ProbeResult(IPStatus Status, string? Ip, long? RttMs);
 }

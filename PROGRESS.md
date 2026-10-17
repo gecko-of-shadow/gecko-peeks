@@ -11,8 +11,8 @@ confirmation is skipped; it neither confirms nor resets the pending change.
 | # | Item | Status | Commit | What changed |
 |---|------|--------|--------|--------------|
 | 1 | Riot ping target = TraceTarget | done | a851e9c | RiotPingTarget = TraceTarget; note text + README updated; TestRunner.cs linked into tests |
-| 2 | Last-hop latency mtr-style (TTL-limited echoes) | done | (see next row's commit) | LastHop() skips the target; TTL=hop echoes to TraceTarget, only Time Exceeded from that IP counts; README updated |
-| 3 | 3 probes per TTL | todo | | |
+| 2 | Last-hop latency mtr-style (TTL-limited echoes) | done | bbaec23 | LastHop() skips the target; TTL=hop echoes to TraceTarget, only Time Exceeded from that IP counts; README updated |
+| 3 | 3 probes per TTL | done | (see next row's commit) | ProbesPerHop=3; MergeProbes(): first answering IP, its lowest RTT, any Success reaches target; silent only if all 3 fail |
 | 4 | False change alerts (HopDiff stars, city names, 2-test confirm) | todo | | |
 | 5 | Adapter/VPN via GetBestInterfaceEx | todo | | |
 | 6 | City codes (cs prefix, 4-letter known codes, kanc/palo) | todo | | |
