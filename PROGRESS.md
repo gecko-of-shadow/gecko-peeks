@@ -15,8 +15,8 @@ confirmation is skipped; it neither confirms nor resets the pending change.
 | 3 | 3 probes per TTL | done | b0523d6 | ProbesPerHop=3; MergeProbes(): first answering IP, its lowest RTT, any Success reaches target; silent only if all 3 fail |
 | 4 | False change alerts (HopDiff stars, city names, 2-test confirm) | done | 96c54c0 | HopDiff ignores IP<->*; RouteChange compares Display() names, blank-city-after-city is indeterminate; RouteChangeConfirmer (in RouteChange.cs) gates the balloon on 2 agreeing tests |
 | 5 | Adapter/VPN via GetBestInterfaceEx | done | e367c14 | GetBestInterfaceEx(TraceTarget) -> ChooseByIndex() on Candidate.Index; falls back to Choose(); blank gateway OK for tunnels |
-| 6 | City codes (cs prefix, 4-letter known codes, kanc/palo) | done | (see next commit) | 'cs' interface prefix; bare 4-letter token returned when IsKnownCode; kanc=Kansas City, palo=Palo Alto |
+| 6 | City codes (cs prefix, 4-letter known codes, kanc/palo) | done | e0e7e97 | 'cs' interface prefix; bare 4-letter token returned when IsKnownCode; kanc=Kansas City, palo=Palo Alto |
 
 A commit cannot contain its own hash, so each item's hash is filled in by the next commit.
 
-Resume: read this file and `git log logic-fixes`, then start at the first `todo` row.
+All six items are done.
